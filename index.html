@@ -2717,13 +2717,27 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     return Promise.resolve(null);
   }
 
-  // 经由本地服务器（server.py）做服务器端抓取，绕过浏览器 CORS
-  function fetchFromServer(bank, code) {
-    const url = "./api/fetch?bank=" + encodeURIComponent(bank) + "&code=" + encodeURIComponent(code);
+  // 服务器端抓取代理：银行披露页/接口几乎都不允许跨域（详见各科 bank skill 的 CORS 记录），
+  // 必须由服务端转发。三级来源：
+  //   ① 线上 Serverless 抓取代理（Cloudflare Workers）—— GitHub Pages 纯静态托管时唯一可用路径
+  //   ② 本地同源 ./api/fetch —— 跑 server.py 时仍可用
+  //   ③ 两者都不可达 → lookupProduct 回退到 App 内嵌的真实快照（离线可用）
+  // 把 API_BASE 置空字符串即退化为改造前的纯本地行为。
+  // 已部署: Cloudflare Workers, 源码见 src/serverless/worker.js
+  const API_BASE = "https://lclist-finance-api.lclist.workers.dev";
+
+  function httpJson(url) {
     return fetch(url, { cache: "no-store" }).then(r => {
       if (!r.ok) throw new Error("status " + r.status);
       return r.json();
     });
+  }
+
+  function fetchFromServer(bank, code) {
+    const q = "?bank=" + encodeURIComponent(bank) + "&code=" + encodeURIComponent(code);
+    return API_BASE
+      ? httpJson(API_BASE + "/api/fetch" + q).catch(() => httpJson("./api/fetch" + q))
+      : httpJson("./api/fetch" + q);
   }
 
   // 把抓取结果填充到表单，并注入真实净值（写入 ICBC_REAL / MULTI_REAL 并持久化）
@@ -2770,10 +2784,10 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       }
       applyLookup(res, bank, code, auto);
     }).catch(() => {
-      // 服务器不可达（例如以 file:// 直接打开）：回退到本地内嵌真实库匹配
+      // 抓取代理不可达：回退到本地内嵌真实库匹配（App 自带的真实快照，离线可用）
       doLookupProduct(bank, code).then(local => {
         if (!local) {
-          if (!auto) toast(bankName(bank) + "：服务器未连接且本地未收录该代码；请运行 server.py 后通过 http://localhost:8080/ 打开，或手动填写");
+          if (!auto) toast(bankName(bank) + "：抓取代理未连接，且本地未收录该代码；请检查网络或手动填写");
           return;
         }
         applyLookup(local, bank, code, auto);
