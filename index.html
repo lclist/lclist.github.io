@@ -634,10 +634,24 @@ try { var _fs = parseFloat(localStorage.getItem("observer_fs")); if (_fs > 0) do
         <th data-key="y3m">3月年化</th>
         <th data-key="y1y">1年年化</th>
         <th data-key="since">成立年化</th>
-        <th data-key="p7_25">7天2.5%</th>
-        <th data-key="p7_30">7天3%</th>
-        <th data-key="p7_35">7天3.5%</th>
-        <th data-key="p7_40">7天4%</th>
+        <th data-key="p7_25" class="col-pct">7天2.5%</th>
+        <th data-key="p7_30" class="col-pct">7天3%</th>
+        <th data-key="p7_35" class="col-pct">7天3.5%</th>
+        <th data-key="p7_40" class="col-pct">7天4%</th>
+        <th data-key="p7_45" class="col-pct">7天4.5%</th>
+        <th data-key="p7_50" class="col-pct">7天5%</th>
+        <th data-key="p14_25" class="col-pct">14天2.5%</th>
+        <th data-key="p14_30" class="col-pct">14天3%</th>
+        <th data-key="p14_35" class="col-pct">14天3.5%</th>
+        <th data-key="p14_40" class="col-pct">14天4%</th>
+        <th data-key="p14_45" class="col-pct">14天4.5%</th>
+        <th data-key="p14_50" class="col-pct">14天5%</th>
+        <th data-key="p30_25" class="col-pct">30天2.5%</th>
+        <th data-key="p30_30" class="col-pct">30天3%</th>
+        <th data-key="p30_35" class="col-pct">30天3.5%</th>
+        <th data-key="p30_40" class="col-pct">30天4%</th>
+        <th data-key="p30_45" class="col-pct">30天4.5%</th>
+        <th data-key="p30_50" class="col-pct">30天5%</th>
         <th data-key="cycleDays">最短持有</th>
         <th data-key="estDays">成立天数</th>
       </tr>
@@ -796,10 +810,24 @@ try { var _fs = parseFloat(localStorage.getItem("observer_fs")); if (_fs > 0) do
             <th data-mgkey="y3m">3月年化</th>
             <th data-mgkey="y1y">1年年化</th>
             <th data-mgkey="since">成立年化</th>
-            <th data-mgkey="p7_25" class="col-p7">7天2.5%</th>
-            <th data-mgkey="p7_30" class="col-p7">7天3%</th>
-            <th data-mgkey="p7_35" class="col-p7">7天3.5%</th>
-            <th data-mgkey="p7_40" class="col-p7">7天4%</th>
+            <th data-mgkey="p7_25" class="col-pct">7天2.5%</th>
+            <th data-mgkey="p7_30" class="col-pct">7天3%</th>
+            <th data-mgkey="p7_35" class="col-pct">7天3.5%</th>
+            <th data-mgkey="p7_40" class="col-pct">7天4%</th>
+            <th data-mgkey="p7_45" class="col-pct">7天4.5%</th>
+            <th data-mgkey="p7_50" class="col-pct">7天5%</th>
+            <th data-mgkey="p14_25" class="col-pct">14天2.5%</th>
+            <th data-mgkey="p14_30" class="col-pct">14天3%</th>
+            <th data-mgkey="p14_35" class="col-pct">14天3.5%</th>
+            <th data-mgkey="p14_40" class="col-pct">14天4%</th>
+            <th data-mgkey="p14_45" class="col-pct">14天4.5%</th>
+            <th data-mgkey="p14_50" class="col-pct">14天5%</th>
+            <th data-mgkey="p30_25" class="col-pct">30天2.5%</th>
+            <th data-mgkey="p30_30" class="col-pct">30天3%</th>
+            <th data-mgkey="p30_35" class="col-pct">30天3.5%</th>
+            <th data-mgkey="p30_40" class="col-pct">30天4%</th>
+            <th data-mgkey="p30_45" class="col-pct">30天4.5%</th>
+            <th data-mgkey="p30_50" class="col-pct">30天5%</th>
             <th data-mgkey="cycleDays">最短持有</th>
             <th data-mgkey="estDays">成立天数</th>
           </tr>
@@ -1412,10 +1440,17 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
 
     const lastWan = points[points.length - 1][2];
 
-    // 「7天X%」：产品成立以来（全历史）每个实际估值日的 7 日年化率，超过各阈值（2.5/3/3.5/4%）的估值日占比
-    const y7vals = daily.filter(p => p.v === 1).map(p => p.y7).filter(v => v !== null && v !== undefined);
-    const pctAbove = (thr) => y7vals.length ? Math.round(y7vals.filter(v => v > thr).length / y7vals.length * 100) : null;
-    const p7_25 = pctAbove(2.5), p7_30 = pctAbove(3.0), p7_35 = pctAbove(3.5), p7_40 = pctAbove(4.0);
+    // 「N天X%」：产品成立以来（全历史）每个实际估值日的 N 日年化率，超过各阈值的估值日占比。
+    // 三个窗口（7/14/30 天）× 六档阈值（2.5/3/3.5/4/4.5/5%）统一计算，便于表头/单元格一并扩展。
+    const PCT_THRESHOLDS = [2.5, 3.0, 3.5, 4.0, 4.5, 5.0];
+    const winVals = (win) => daily.filter(p => p.v === 1)
+      .map(p => p[win]).filter(v => v !== null && v !== undefined);
+    const pctAbove = (arr, thr) => arr.length
+      ? Math.round(arr.filter(v => v > thr).length / arr.length * 100) : null;
+    const pctRow = (win) => { const a = winVals(win); return PCT_THRESHOLDS.map(t => pctAbove(a, t)); };
+    const [p7_25, p7_30, p7_35, p7_40, p7_45, p7_50] = pctRow("y7");
+    const [p14_25, p14_30, p14_35, p14_40, p14_45, p14_50] = pctRow("y14");
+    const [p30_25, p30_30, p30_35, p30_40, p30_45, p30_50] = pctRow("y1m");
 
     // 成立天数：自成立日期至今天的日历天数
     const estDays = seed.established
@@ -1434,7 +1469,9 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
       y7: annAt(lastIdx, 7), y14: annAt(lastIdx, 14), y1m: annAt(lastIdx, 30),
       y3m: annAt(lastIdx, 90), y6m: annAt(lastIdx, 180), y1y: annAt(lastIdx, 365),
       since: annAt(lastIdx, lastIdx), isLong: !!seed.is_long,
-      p7_25, p7_30, p7_35, p7_40, estDays,
+      p7_25, p7_30, p7_35, p7_40, p7_45, p7_50,
+      p14_25, p14_30, p14_35, p14_40, p14_45, p14_50,
+      p30_25, p30_30, p30_35, p30_40, p30_45, p30_50, estDays,
     };
 
     const history = points.map(([ds, nav, wan]) => ({ date: ds, nav, wan }));
@@ -1559,7 +1596,10 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
 
   // ---------------- 排序（与后端 _sort_rows 一致） ----------------
   const SORTABLE = new Set(["dailyWan", "d1", "avg7", "avg14", "y7", "y14", "y1m", "y3m", "y1y", "since",
-    "p7_25", "p7_30", "p7_35", "p7_40", "estDays", "cycleDays",
+    "p7_25", "p7_30", "p7_35", "p7_40", "p7_45", "p7_50",
+    "p14_25", "p14_30", "p14_35", "p14_40", "p14_45", "p14_50",
+    "p30_25", "p30_30", "p30_35", "p30_40", "p30_45", "p30_50",
+    "estDays", "cycleDays",
     "nav", "zeroDays30", "negDays30", "navDate", "established", "name"]);
   function sortRows(rows, key, reverse) {
     key = SORTABLE.has(key) ? key : "y7";
@@ -1974,6 +2014,13 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       y1m: num(last.y1m), y3m: num(last.y3m), y1y: num(last.y1y), since: num(last.since),
       zeroDays30: zero30, negDays30: neg30,
     };
+    // 候选产品同样给出「N天X%」达标占比，口径与计算结果一致（全历史估值日的年化率超阈值占比）
+    for (const [pre, win] of [["p7", "y7"], ["p14", "y14"], ["p30", "y1m"]]) {
+      const arr = daily.filter(p => p.v === 1).map(p => p[win]).filter(v => v !== null && v !== undefined);
+      for (const [sfx, t] of [["25", 2.5], ["30", 3.0], ["35", 3.5], ["40", 4.0], ["45", 4.5], ["50", 5.0]]) {
+        row[pre + "_" + sfx] = arr.length ? Math.round(arr.filter(v => v > t).length / arr.length * 100) : null;
+      }
+    }
     return { row, daily };
   }
   let _candCache = null;
@@ -1992,6 +2039,16 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       return (x - y) * ord;
     });
   }
+  /* 「N天X%」达标占比列：概览页与管理页共用同一份键顺序，避免表头与单元格错位 */
+  const PCT_KEYS = [
+    "p7_25", "p7_30", "p7_35", "p7_40", "p7_45", "p7_50",
+    "p14_25", "p14_30", "p14_35", "p14_40", "p14_45", "p14_50",
+    "p30_25", "p30_30", "p30_35", "p30_40", "p30_45", "p30_50",
+  ];
+  const pctCells = (r) => PCT_KEYS.map(k =>
+    `<td class="col-pct">${r[k] == null ? '<span class="val-zero">--</span>' : `<span class="val-red">${r[k]}%</span>`}</td>`
+  ).join("");
+
   function rowHtml(r) {
     const cn = r.confirmDays || 1;
     const star = isFav(r.code) ? `<span class="name-star">★</span>` : "";
@@ -2015,10 +2072,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       <td>${fmt.pct(r.y3m)}</td>
       <td>${fmt.pct(r.y1y)}</td>
       <td>${fmt.pct(r.since)}</td>
-      <td class="col-p7">${r.p7_25 == null ? '<span class="val-zero">--</span>' : `<span class="val-red">${r.p7_25}%</span>`}</td>
-      <td class="col-p7">${r.p7_30 == null ? '<span class="val-zero">--</span>' : `<span class="val-red">${r.p7_30}%</span>`}</td>
-      <td class="col-p7">${r.p7_35 == null ? '<span class="val-zero">--</span>' : `<span class="val-red">${r.p7_35}%</span>`}</td>
-      <td class="col-p7">${r.p7_40 == null ? '<span class="val-zero">--</span>' : `<span class="val-red">${r.p7_40}%</span>`}</td>
+      ${pctCells(r)}
       <td>${r.cycleDays == null ? '--' : r.cycleDays}</td>
       <td>${r.estDays == null ? '--' : r.estDays}</td>
     </tr>`;
@@ -2032,7 +2086,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       const activeCodes = new Set();
       Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" }).forEach(r => activeCodes.add(r.code));
       state.passed.forEach(c => activeCodes.add(c));
-      let rows = candRowsAll().filter(r => !activeCodes.has(r.code));
+      // 在管理页删掉的候选，概览页候选池必须同步消失（与 renderManage 同一套过滤条件）
+      let rows = candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0);
       if (state.bank && state.bank !== "all") rows = rows.filter(r => r.bank === state.bank);
       if (state.q) { const q = state.q.toLowerCase(); rows = rows.filter(r => (r.name + " " + r.code + " " + r.manager).toLowerCase().includes(q)); }
       if (state.starOnly) rows = rows.filter(r => isFav(r.code));
@@ -2051,7 +2106,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     state.lastRefresh = Engine.lastRefresh();
     state.holidays = Engine.HOLIDAYS;
     let rows = state.rows.filter(r => !state.starOnly || isFav(r.code));
-    let passedRows = candRowsAll().filter(r => state.passed.includes(r.code));
+    let passedRows = candRowsAll().filter(r => state.passed.includes(r.code) && state.deletedCands.indexOf(r.code) < 0);
     if (state.bank && state.bank !== "all") passedRows = passedRows.filter(r => r.bank === state.bank);
     rows = rows.concat(passedRows);
     $("#footTip").textContent =
@@ -2387,10 +2442,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       <td>${fmt.pct(r.y3m)}</td>
       <td>${fmt.pct(r.y1y)}</td>
       <td>${fmt.pct(r.since)}</td>
-      <td class="col-p7">${r.p7_25 == null ? '<span class="val-zero">--</span>' : `<span class="val-red">${r.p7_25}%</span>`}</td>
-      <td class="col-p7">${r.p7_30 == null ? '<span class="val-zero">--</span>' : `<span class="val-red">${r.p7_30}%</span>`}</td>
-      <td class="col-p7">${r.p7_35 == null ? '<span class="val-zero">--</span>' : `<span class="val-red">${r.p7_35}%</span>`}</td>
-      <td class="col-p7">${r.p7_40 == null ? '<span class="val-zero">--</span>' : `<span class="val-red">${r.p7_40}%</span>`}</td>
+      ${pctCells(r)}
       <td>${r.cycleDays == null ? '--' : r.cycleDays}</td>
       <td>${r.estDays == null ? '--' : r.estDays}</td>
     </tr>`;
@@ -2425,7 +2477,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
         sort: state.mgSort || "dailyWan", order: state.mgOrder, q: state.q || "",
       });
       // 已通过的候选也并入精选（与概览一致），支持在管理页双向移动
-      let passedRows = candRowsAll().filter(r => state.passed.includes(r.code));
+      let passedRows = candRowsAll().filter(r => state.passed.includes(r.code) && state.deletedCands.indexOf(r.code) < 0);
       if (state.bank && state.bank !== "all") passedRows = passedRows.filter(r => r.bank === state.bank);
       rows = rows.concat(passedRows);
     }
@@ -2515,7 +2567,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     showConfirm(`要删除 ${codes.length} 个产品吗？`, () => {
       codes.forEach(code => { if (state.deletedCands.indexOf(code) < 0) state.deletedCands.push(code); });
       persistDeletedCands();
-      renderMgBanks(); renderManage();
+      // 同时刷新背后的概览页：候选 tab 与银行计数都要跟着少掉这些产品
+      renderMgBanks(); renderManage(); renderTable(); renderBanks();
       toast(`已删除 ${codes.length} 个候选产品`);
     });
   }
@@ -3157,13 +3210,18 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
   $("#btnExport").addEventListener("click", () => {
     const data = Engine.exportData();
+    // 收藏/已通过候选/已删候选都是前端本地状态，不在 Engine 注册表里，导出时一并备份，
+    // 否则恢复备份后会丢掉这些偏好（删除的候选还会复活）。
+    data.favs = state.favs.slice();
+    data.passed = state.passed.slice();
+    data.deletedCands = state.deletedCands.slice();
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "products-backup.json";
     a.click();
     URL.revokeObjectURL(a.href);
-    toast("已导出备份");
+    toast(`已导出备份（含 ${data.favs.length} 个收藏）`);
   });
 
   $("#btnImport").addEventListener("click", () => $("#fImport").click());
@@ -3176,6 +3234,15 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       try { data = JSON.parse(fr.result); } catch (_) { toast("文件格式不正确"); return; }
       if (!confirm("导入会覆盖当前自定义配置（原配置自动备份），继续？")) return;
       const d = Engine.importData(data);
+      // 只恢复备份文件里真正存在的字段：旧版备份不含这些键时，保持本地现状不被清空
+      if (Array.isArray(data.favs)) { state.favs = data.favs.slice(); }
+      if (Array.isArray(data.passed)) { state.passed = data.passed.slice(); }
+      if (Array.isArray(data.deletedCands)) { state.deletedCands = data.deletedCands.slice(); }
+      try {
+        localStorage.setItem("observer_favs", JSON.stringify(state.favs));
+        localStorage.setItem("observer_passed", JSON.stringify(state.passed));
+        localStorage.setItem("observer_deleted_cands", JSON.stringify(state.deletedCands));
+      } catch (e) {}
       afterManage(d);
     };
     fr.readAsText(file);
