@@ -321,6 +321,14 @@ td.cell-name { box-shadow: 6px 0 8px -6px rgba(90, 80, 180, .18); }
   font-size: calc(12.5px * var(--fs)); color: #667;
 }
 .mg-tabs button.active { background: #efe9ff; color: #6a5fd0; font-weight: 600; }
+/* 精选/候选 行右侧的字号 ＋ / －（该行只有 id=mgTabs，class 是 big-tabs，故用 id 选择器） */
+#mgTabs .mg-fs { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+#mgTabs .mg-fs button {
+  box-sizing: border-box; width: 30px; height: 30px; padding: 0; border-radius: 8px;
+  background: #fff; color: #6a5fd0; display: flex; align-items: center; justify-content: center;
+  font-size: calc(15px * var(--fs)); font-weight: 600; line-height: 1; flex: 0 0 auto;
+}
+#mgTabs .mg-fs button:active { background: #e6e2f8; }
 .mg-filter {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px; border-bottom: 1px solid #f2f0fa; background: #fbfaff;
@@ -363,10 +371,6 @@ td.cell-name { box-shadow: 6px 0 8px -6px rgba(90, 80, 180, .18); }
 .mg-panel .table-wrap { box-shadow: none; margin: 0; }
 .mg-panel .hero { padding: 12px 12px 6px; }
 .mg-panel .panel { padding: 4px 12px 6px; }
-.mg-panel .modal-note {
-  flex: 0 0 auto; padding: 8px 12px calc(10px + env(safe-area-inset-bottom)); margin-top: 0;
-  border-top: 1px solid #f4f2fa; max-height: 108px; overflow-y: auto;
-}
 
 /* 窄屏：头部按钮收紧，避免标题被挤成竖排 */
 @media (max-width: 374px) {
@@ -389,6 +393,7 @@ td.cell-name { box-shadow: 6px 0 8px -6px rgba(90, 80, 180, .18); }
 .btn-mini:disabled { opacity: .5; cursor: not-allowed; }
 .col-check { width: 34px; min-width: 34px; text-align: center; padding-left: 6px; padding-right: 6px; }
 .mg-toolbar { flex: 0 0 auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 9px 12px; border-bottom: 1px solid #f0f0f6; background: #fafbff; }
+.mg-toolbar .mg-note { flex: 1 1 auto; min-width: 0; color: #999; font-size: calc(11.5px * var(--fs)); line-height: 1.5; }
 .mg-toolbar .sel-count { margin-left: auto; color: #888; font-size: calc(12px * var(--fs)); white-space: nowrap; }
 #confirmMask { z-index: 400; }
 .btn-sm { padding: 6px 9px; border-radius: 8px; font-size: calc(12px * var(--fs)); }
@@ -752,6 +757,10 @@ try { var _fs = parseFloat(localStorage.getItem("observer_fs")); if (_fs > 0) do
     <div class="big-tabs" id="mgTabs">
       <button class="mg-tab active" data-mgtab="short">精选</button>
       <button class="mg-tab" data-mgtab="candidate">候选</button>
+      <div class="mg-fs">
+        <button type="button" id="mgFontPlus" title="字体放大 10%"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button type="button" id="mgFontMinus" title="字体缩小 10%"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+      </div>
     </div>
     <div class="hero">
       <div class="panel">
@@ -787,7 +796,6 @@ try { var _fs = parseFloat(localStorage.getItem("observer_fs")); if (_fs > 0) do
       </table>
       <div class="empty hidden" id="mgEmpty"></div>
     </main>
-    <p class="modal-note">「精选」页点产品名称即可修改信息（名称 / 管理人 / 持有期 / 风险 / 成立日期 / T+N / 额度等），表头可排序；「候选」页为真实抓取自工商银行披露页的产品，点「通过」加入精选、点「退回」移回候选。配置保存在服务器，建议定期「导出」备份。</p>
   </section>
 </div>
 
@@ -2389,16 +2397,19 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     syncMgCheckAll();
   }
 
+  const MG_NOTE = "点产品名称可修改信息，配置保存在服务器，建议定期「导出」备份";
   function renderMgToolbar() {
     const bar = $("#mgToolbar");
     if (state.mgTab === "candidate") {
       bar.innerHTML = `
         <button class="btn-mini primary" data-mgact="toShort">移动到精选</button>
         <button class="btn-mini danger" data-mgact="del">删除</button>
+        <span class="mg-note">${MG_NOTE}</span>
         <span class="sel-count" id="mgSelCount"></span>`;
     } else {
       bar.innerHTML = `
         <button class="btn-mini primary" data-mgact="toCand">移动到候选</button>
+        <span class="mg-note">${MG_NOTE}</span>
         <span class="sel-count" id="mgSelCount"></span>`;
     }
   }
@@ -2902,6 +2913,10 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   /* --- 右上角字号 ＋/－：全体字体 ±10%，持久化 --- */
   $("#btnFontPlus").addEventListener("click", () => applyFs(fsVal * 1.1, true));
   $("#btnFontMinus").addEventListener("click", () => applyFs(fsVal / 1.1, true));
+
+  /* --- 产品管理页「精选/候选」行右侧 ＋/－：同右上角，全体字体 ±10% --- */
+  $("#mgFontPlus").addEventListener("click", () => applyFs(fsVal * 1.1, true));
+  $("#mgFontMinus").addEventListener("click", () => applyFs(fsVal / 1.1, true));
 
   $("#btnCloseManage").addEventListener("click", userCloseManage);
   $("#manageMask").addEventListener("click", e => { if (e.target === $("#manageMask")) userCloseManage(); });
