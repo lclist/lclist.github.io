@@ -830,7 +830,10 @@ try { var _fs = parseFloat(localStorage.getItem("observer_fs")); if (_fs > 0) do
       </label>
       <label class="fld"><span>产品名称</span><input id="fName" maxlength="40" placeholder="必填"></label>
       <label class="fld"><span>管理人</span><input id="fManager" maxlength="20" placeholder="可留空"></label>
-      <label class="fld"><span>期限类型</span><select id="fTerm"></select></label>
+      <label class="fld"><span>持有天数</span>
+        <input id="fHoldDays" type="number" step="1" min="1" max="3650" inputmode="numeric" placeholder="必填，如 30">
+        <em class="fld-hint">最短持有天数，必填（1~3650 的整数）</em>
+      </label>
       <label class="fld"><span>风险等级</span><select id="fRisk"></select>
         <em class="fld-hint">工行产品自动取产品说明书；说明书不可得时按产品名称推断，可在此更正</em>
       </label>
@@ -1301,7 +1304,7 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
 
     const series = [];
     let nav = 1.0;
-    const cycle = TERM_DAYS[term] || 1;
+    const cycle = seed.termDays || TERM_DAYS[term] || 1;
     const phase = Math.floor(rng() * cycle);
     let d = start;
     while (d <= end) {
@@ -1422,7 +1425,8 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
     const row = {
       code: seed.code, name: seed.name, fullName: seed.full, bank: seed.bank,
       bankName: BANKS[seed.bank].name, manager: seed.manager, term: seed.term,
-      termLabel: TERM_LABEL[seed.term] || "", cycleDays: TERM_DAYS[seed.term] || 1,
+      termLabel: seed.termDays ? `最短持有${seed.termDays}天` : (TERM_LABEL[seed.term] || ""),
+      cycleDays: seed.termDays || TERM_DAYS[seed.term] || 1,
       risk: seed.risk, established: seed.established, benchmark: seed.benchmark,
       navDate: latestDs, nav: latestNav, dailyWan: lastWan,
       d1: Math.round(lastWan * 365.0 / 100.0 * 100) / 100,
@@ -1463,6 +1467,7 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
     for (const c of reg.custom) {
       out.push({
         bank: c.bank, code: c.code, name: c.name, manager: c.manager || "", term: c.term || "daily",
+        termDays: c.termDays || null,
         risk: c.risk || "R2", established: c.established || "2026-01-01",
         benchmark: c.benchmark || "—", target: c.target || 0.028, vol: c.vol || 0.6,
         is_long: !!c.is_long, builtin: false, origin: "custom",
@@ -1498,7 +1503,7 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
         bank: it.bank, code: it.code, name: it.name,
         full: it.code && it.name.indexOf(it.code) >= 0
           ? `${it.manager}${it.name}` : `${it.manager}${it.name}（${it.code}）`,
-        manager: it.manager, term: it.term, risk: it.risk,
+        manager: it.manager, term: it.term, termDays: it.termDays || null, risk: it.risk,
         established: it.established, benchmark: it.benchmark,
         target: it.target, vol: it.vol, is_long: it.is_long,
       };
@@ -1617,6 +1622,15 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
 
   // ---------------- 产品管理（添加 / 修改 / 删除 / 备份） ----------------
   const CODE_RE = /^[A-Z0-9_-]{1,32}$/;
+  // 持有天数：用户可填任意整数天；能对应到内置档位（1/7/14/30/91/182）则同时记 term 键，否则归到 daily 档位逻辑
+  function termFromDays(d) {
+    for (const k in TERM_DAYS) if (TERM_DAYS[k] === d) return k;
+    return "daily";
+  }
+  function normDays(v) {
+    const n = Math.round(Number(v));
+    return isFinite(n) && n >= 1 ? Math.min(3650, n) : null;
+  }
   const clean = (s, limit) => String(s || "").replace(/[<>"'&]/g, "").trim().slice(0, limit);
   function checkCode(code) {
     code = (code || "").trim().toUpperCase();
@@ -1640,9 +1654,11 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
       return { ok: false, message: `产品代码 ${v.code} 已存在，不能重复添加；请在列表里点它进入编辑` };
     }
     if (!v.name) return { ok: false, message: "请填写产品名称" };
+    const _days = normDays(v.termDays);
+    if (!_days) return { ok: false, message: "请填写持有天数（1~3650 的整数）" };
     reg.custom.push({
       bank: v.bank, code: v.code, name: clean(v.name, 40), manager: clean(v.manager, 20),
-      term: TERM_DAYS[v.term] ? v.term : "daily", risk: RISKS.indexOf(v.risk) >= 0 ? v.risk : "R2",
+      term: termFromDays(_days), termDays: _days, risk: RISKS.indexOf(v.risk) >= 0 ? v.risk : "R2",
       established: v.established || "2026-01-01", target: isFinite(v.target) && v.target > 0 ? v.target : 0.028,
       confirm: v.confirm || null, stock: v.stock || "", quota: clean(v.quota, 40),
       benchmark: "—",
@@ -1658,7 +1674,8 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
     const patch = Object.assign({}, reg.patches[code] || {});
     if (v.name) patch.name = clean(v.name, 40);
     if (v.manager !== undefined) patch.manager = clean(v.manager, 20);
-    if (v.term && TERM_DAYS[v.term]) patch.term = v.term;
+    const _days = normDays(v.termDays);
+    if (_days) { patch.termDays = _days; patch.term = termFromDays(_days); }
     if (v.risk && RISKS.indexOf(v.risk) >= 0) patch.risk = v.risk;
     if (v.established !== undefined) patch.established = v.established || it.established;
     if (v.confirm !== undefined) patch.confirm = v.confirm || null;
@@ -1704,7 +1721,8 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
         established: patched.established || it.established, establishedSrc: patched.established ? "自定义" : "推定",
         stock: it.stock || patched.stock || "", quota: it.quota || patched.quota || "",
         bankName: BANKS[it.bank].name, termLabel: TERM_LABEL[it.term] || "",
-        termShort: TERM_SHORT[it.term] || it.term, termDays: TERM_DAYS[it.term] || 0,
+        termShort: (it.termDays ? it.termDays + "天" : TERM_SHORT[it.term]) || it.term,
+        termDays: it.termDays || TERM_DAYS[it.term] || 0,
         target: it.target ? Math.round(it.target * 10000) / 100 : null,
         source: r.source || "demo", navDate: r.navDate || "",
         points: (histBy[it.code] || []).length, isLong: !!(r.isLong),
@@ -2539,7 +2557,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     const meta = state.mgMeta;
     if (!meta.banks) { toast("目录尚未加载"); return; }
     fillSelect($("#fBank"), meta.banks.map(b => ({ key: b.key, label: b.name })), it ? it.bank : "icbc");
-    fillSelect($("#fTerm"), meta.terms.map(t => ({ key: t.key, label: t.label })), it ? it.term : "daily");
+    // 持有天数用数字输入框（任意天数），不再受期限下拉的枚举值限制
+    $("#fHoldDays").value = it ? (it.termDays || Engine.TERM_DAYS[it.term] || "") : "";
     fillSelect($("#fRisk"), meta.risks.map(r => ({ key: r, label: r })), it ? it.risk : "R2");
     fillSelect($("#fStock"), (meta.stocks || []).map(x => ({ key: x.key, label: x.label })), it ? (it.stock || "") : "");
     $("#fQuota").value = it && it.quota ? it.quota : "";
@@ -2616,9 +2635,14 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     const bank = $("#fBank").value;
     const name = $("#fName").value.trim();
     if (!name) { showEditErr("请填写产品名称"); return; }
+    const holdRaw = $("#fHoldDays").value.trim();
+    const holdDays = parseInt(holdRaw, 10);
+    if (!holdRaw || isNaN(holdDays) || holdDays < 1 || holdDays > 3650) {
+      showEditErr("请填写持有天数（1~3650 的整数）"); return;
+    }
     const body = {
       bank, name, manager: $("#fManager").value.trim(),
-      term: $("#fTerm").value, risk: $("#fRisk").value,
+      termDays: holdDays, risk: $("#fRisk").value,
     };
     if (!code) body.code = $("#fCode").value.trim().toUpperCase();
     if (!code && !body.code) { showEditErr("请填写产品代码"); return; }
