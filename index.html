@@ -803,7 +803,7 @@ try { var _fs = parseFloat(localStorage.getItem("observer_fs")); if (_fs > 0) do
       <label class="fld"><span>产品代码</span>
         <div class="fld-row">
           <input id="fCode" maxlength="32" placeholder="如 AF53040B">
-          <button type="button" class="btn-mini" id="btnLookup">从银行抓取</button>
+          <button type="button" class="btn-mini" id="btnLookup">查询</button>
         </div>
         <em class="fld-hint" id="fCodeHint"></em>
         <em class="fld-err hidden" id="fCodeDup"></em>
@@ -2398,7 +2398,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
         <span class="sel-count" id="mgSelCount"></span>`;
     } else {
       bar.innerHTML = `
-        <button class="btn-mini primary" data-mgact="toCand">移动到备选</button>
+        <button class="btn-mini primary" data-mgact="toCand">移动到候选</button>
         <span class="sel-count" id="mgSelCount"></span>`;
     }
   }
@@ -2482,11 +2482,11 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     const icbc = $("#fBank").value === "icbc";
     // 目标年化：仅非工行手动录入（工行从真实净值推算，见主表「真实」标识）
     $$(".f-nonicbc").forEach(el => el.classList.toggle("hidden", icbc));
-    // 所有银行（含工行）均支持「从银行抓取」（经本地服务器 server.py 实时抓取）
+    // 所有银行（含工行）均支持「查询」（经 Serverless 代理 / 本地 server.py 实时抓取）
     $("#btnLookup").classList.remove("hidden");
     $("#fCodeHint").textContent = icbc
-      ? "输入产品代码后由本地服务器从银行（工行候选池 / 真实净值快照）抓取，自动填充名称 / 管理人 / 成立日"
-      : "输入产品代码后点『从银行抓取』，由本地服务器实时抓取并自动填充；直接以 file:// 打开则回退本地内嵌真实库";
+      ? "输入产品代码后点『查询』，从工行候选池 / 真实净值快照抓取并填充名称 / 管理人 / 成立日"
+      : "输入产品代码后点『查询』，由服务器从银行实时抓取并填充；直接以 file:// 打开则回退本地内嵌真实库";
   }
 
   function openEdit(code) {
@@ -2529,11 +2529,11 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
   function codeHintDefault() {
     return $("#fBank").value === "icbc"
-      ? "输入产品代码后由本地服务器（工行候选池 / 真实净值快照）自动填充"
-      : "输入产品代码后由本地服务器从银行实时抓取；以 file:// 打开则回退本地内嵌真实库";
+      ? "输入产品代码后点『查询』，从工行候选池 / 真实净值快照填充"
+      : "输入产品代码后点『查询』，由服务器从银行实时抓取；以 file:// 打开则回退本地内嵌真实库";
   }
 
-  let _codeTimer = null, _lookupTimer = null;
+  let _codeTimer = null;
   function onCodeInput() {
     const code = $("#fCode").value.trim().toUpperCase();
     state.codeExists = false;
@@ -2541,12 +2541,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     clearTimeout(_codeTimer);
     if (state.editCode || !code) { $("#fCodeHint").textContent = codeHintDefault(); return; }
     _codeTimer = setTimeout(() => checkCode(code), 350);
-    // 所有银行：输入代码（停顿后）自动尝试从银行抓取，仅填充尚未填写的字段
-    const bank = $("#fBank").value;
-    clearTimeout(_lookupTimer);
-    _lookupTimer = setTimeout(() => {
-      if ($("#fCode").value.trim().toUpperCase() === code) lookupProduct(bank, code, true);
-    }, 700);
+    // 输入时只做代码查重，不再自动抓取：只有点「查询」按钮才请求上游，
+    // 避免边打字边对银行接口发请求（既浪费配额，也会打断输入）。
   }
 
   function checkCode(code) {
@@ -2768,7 +2764,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     }
   }
 
-  // auto=true：输入时静默填充空字段；auto=false：点按钮显式从银行抓取（覆盖字段并提示）
+  // auto=true：静默填充空字段；auto=false：点「查询」显式抓取（覆盖字段并提示）
+  // 注：输入代码已不再自动触发抓取，当前只有「查询」按钮会调用（auto=false）
   function lookupProduct(bank, code, auto) {
     code = (code || "").trim().toUpperCase();
     if (!code) { if (!auto) toast("请先填写产品代码"); return; }
@@ -2776,7 +2773,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     if (state.editCode) { if (!auto) toast("该产品已在列表中，修改请直接编辑字段"); return; }
     const btn = $("#btnLookup");
     const oldText = btn.textContent;
-    btn.disabled = true; btn.textContent = "服务器抓取中…";
+    btn.disabled = true; btn.textContent = "查询中…";
     fetchFromServer(bank, code).then(res => {
       if (!res || (!res.series && !res.name)) {
         if (!auto) toast(bankName(bank) + "：服务器未收录该代码，请确认代码或手动填写");
@@ -2986,7 +2983,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   $("#editForm").addEventListener("submit", submitEdit);
   $("#btnCloseEdit").addEventListener("click", userCloseEdit);
   $("#btnCancelEdit").addEventListener("click", userCloseEdit);
-  $("#editMask").addEventListener("click", e => { if (e.target === $("#editMask")) userCloseEdit(); });
+  // 点遮罩不再关闭、也不切页：添加产品页保持最上方，必须显式点 ✕ / 取消 才关闭。
+  // （遮罩是 fixed inset:0，下层页面本就收不到点击；原先点遮罩会关闭弹窗并 history.back()
+  //   回落到管理页，看起来就像"切换到其它页"，故移除该行为。）
   $("#btnLookup").addEventListener("click", () => lookupProduct($("#fBank").value, $("#fCode").value.trim().toUpperCase(), false));
   $("#fCode").addEventListener("input", onCodeInput);
   $("#fBank").addEventListener("change", () => { toggleNonIcbcFields(); onCodeInput(); });
