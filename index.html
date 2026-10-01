@@ -2866,16 +2866,44 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       : httpJson("./api/fetch" + q);
   }
 
+  // 已知 ICBC 产品的权威元数据种子（与 serverless Worker 同步；本地优先命中，无需联网即可补全 风险/成立日/持有天数）
+  const ICBC_META_SEEDS = {
+    "26G2754A": { risk: "R1", established: "2026-06-25", holdDays: 1, regCode: "Z7000826000942", cwProdId: "26GS2754", keyword: "天天鑫稳益", manager: "工银理财" },
+    "26GS2754": { risk: "R1", established: "2026-06-25", holdDays: 1, regCode: "Z7000826000942", cwProdId: "26GS2754", keyword: "天天鑫稳益", manager: "工银理财" },
+  };
+
+  // 元数据代理：补全 ICBC 接口缺失的「风险等级 / 成立日期 / 持有天数」
+  // ① 本地种子优先（瞬时、离线可用）；② 否则走 Worker /api/meta（中国理财网实时跨库，需部署 Worker）
+  function fetchMeta(bank, code) {
+    code = (code || "").toUpperCase();
+    if ((bank || "").toLowerCase() === "icbc" && ICBC_META_SEEDS[code]) {
+      const s = ICBC_META_SEEDS[code];
+      return Promise.resolve({
+        risk: s.risk || null, established: s.established || null,
+        holdDays: s.holdDays != null ? s.holdDays : null,
+        regCode: s.regCode || null, name: s.name || null, manager: s.manager || null, source: "seed",
+      });
+    }
+    const q = "?bank=" + encodeURIComponent(bank) + "&code=" + encodeURIComponent(code);
+    return API_BASE
+      ? httpJson(API_BASE + "/api/meta" + q).catch(() => httpJson("./api/meta" + q))
+      : httpJson("./api/meta" + q);
+  }
+
   // 把抓取结果填充到表单，并注入真实净值（写入 ICBC_REAL / MULTI_REAL 并持久化）
   function applyLookup(res, bank, code, auto) {
     if (auto) {
       if (!$("#fName").value.trim()) $("#fName").value = res.name || "";
       if (!$("#fManager").value.trim()) $("#fManager").value = res.manager || "";
       if (!$("#fEst").value && res.established) $("#fEst").value = res.established;
+      if (!$("#fRisk").value.trim() && res.risk) $("#fRisk").value = res.risk;
+      if (($("#fHoldDays").value === "" || $("#fHoldDays").value == null) && res.holdDays != null) $("#fHoldDays").value = res.holdDays;
     } else {
       if (res.name) $("#fName").value = res.name;
       if (res.manager) $("#fManager").value = res.manager;
       if (res.established) $("#fEst").value = res.established;
+      if (res.risk) $("#fRisk").value = res.risk;
+      if (res.holdDays != null) $("#fHoldDays").value = res.holdDays;
     }
     if (res.series && res.series.length) {
       if (bank === "icbc") {
@@ -2904,21 +2932,29 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     const btn = $("#btnLookup");
     const oldText = btn.textContent;
     btn.disabled = true; btn.textContent = "查询中…";
-    fetchFromServer(bank, code).then(res => {
+    // 主数据源（净值序列 + 名称/管理人）与中国理财网元数据（风险/成立日/持有天数）并行获取，再合并
+    const mainP = fetchFromServer(bank, code)
+      .catch(() => doLookupProduct(bank, code).then(local => local));
+    const metaP = fetchMeta(bank, code).catch(() => null);
+    Promise.all([mainP, metaP]).then(([res, meta]) => {
       if (!res || (!res.series && !res.name)) {
+        // 主数据源无结果：若中国理财网给了元数据（含名称），仍填充，便于用户补充净值
+        if (meta && (meta.risk || meta.established || meta.holdDays != null || meta.name)) {
+          applyLookup(meta, bank, code, auto);
+          return;
+        }
         if (!auto) toast(bankName(bank) + "：服务器未收录该代码，请确认代码或手动填写");
         return;
       }
+      if (meta) {
+        if (meta.risk) res.risk = meta.risk;
+        if (meta.established) res.established = meta.established;
+        if (meta.holdDays != null) res.holdDays = meta.holdDays;
+        if (meta.name && !res.name) res.name = meta.name;
+        if (meta.manager && !res.manager) res.manager = meta.manager;
+        res.metaSource = meta.source;
+      }
       applyLookup(res, bank, code, auto);
-    }).catch(() => {
-      // 抓取代理不可达：回退到本地内嵌真实库匹配（App 自带的真实快照，离线可用）
-      doLookupProduct(bank, code).then(local => {
-        if (!local) {
-          if (!auto) toast(bankName(bank) + "：抓取代理未连接，且本地未收录该代码；请检查网络或手动填写");
-          return;
-        }
-        applyLookup(local, bank, code, auto);
-      });
     }).finally(() => { btn.disabled = false; btn.textContent = oldText; });
   }
 
