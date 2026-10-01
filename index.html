@@ -2793,11 +2793,17 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   // 已部署: Cloudflare Workers, 源码见 src/serverless/worker.js
   const API_BASE = "https://lclist-finance-api.lclist.workers.dev";
 
-  function httpJson(url) {
-    return fetch(url, { cache: "no-store" }).then(r => {
-      if (!r.ok) throw new Error("status " + r.status);
-      return r.json();
-    });
+  // timeoutMs：代理不通时（尤其 file:// 场景）避免请求永久悬挂，自动刷新会并发发起多个，必须限时
+  function httpJson(url, timeoutMs) {
+    const ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs || 20000) : null;
+    const clear = () => { if (timer) clearTimeout(timer); };
+    const opt = { cache: "no-store" };
+    if (ctrl) opt.signal = ctrl.signal;
+    return fetch(url, opt).then(
+      r => { clear(); if (!r.ok) throw new Error("status " + r.status); return r.json(); },
+      e => { clear(); throw e; }
+    );
   }
 
   function fetchFromServer(bank, code) {
@@ -2863,6 +2869,94 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     }).finally(() => { btn.disabled = false; btn.textContent = oldText; });
   }
 
+  /* ---------- 刷新：真正向银行重新拉取尚无真实净值的产品 ---------- */
+  // 只写真实净值数据集并持久化，不触碰表单（区别于 applyLookup）
+  function adoptRealSeries(bank, code, res) {
+    if (!res || !res.series || !res.series.length) return false;
+    const obj = { name: res.name, manager: res.manager, kind: res.kind || "nav", series: res.series };
+    if (bank === "icbc") {
+      window.ICBC_REAL = window.ICBC_REAL || {};
+      window.ICBC_REAL[code] = obj;
+      persistLookupReal(code, obj, "icbc");
+    } else {
+      window.MULTI_REAL = window.MULTI_REAL || {};
+      window.MULTI_REAL[code] = obj;
+      persistLookupReal(code, obj, bank);
+    }
+    return true;
+  }
+
+  // 单个产品：icbc 走 Serverless 代理 / 本地 server 实时抓取，其余先查本地内嵌快照
+  function probeRealOne(bank, code) {
+    const tryOne = (bk) => {
+      const p = (bk === "icbc")
+        ? fetchFromServer(bk, code).catch(() => doLookupProduct(bk, code))
+        : doLookupProduct(bk, code);
+      return Promise.resolve(p)
+        .then(res => (res && res.series && res.series.length) ? adoptRealSeries(bk, code, res) : false)
+        .catch(() => false);
+    };
+    return tryOne(bank).then(ok => {
+      if (ok) return true;
+      // 他行发行的代销产品（如民生理财 富竹系列）在工行披露库中同样有净值，兜底再走一次工行通道
+      return bank === "icbc" ? false : tryOne("icbc");
+    });
+  }
+
+  let _refreshBusy = false;
+  // 刷新 = 先把列表里仍为「演示」的产品逐个去银行补齐真实净值，再重建；
+  // 已全部为真实净值时不会发起任何网络请求，退化为纯本地刷新。
+  function refreshRealData() {
+    if (_refreshBusy) { toast("正在刷新中，请稍候…"); return Promise.resolve(); }
+    _refreshBusy = true;
+    const todo = [], seen = new Set();
+    for (const r of Engine.products({ tab: "short" })) {
+      if (r.source === "real") continue;
+      const code = (r.code || "").trim().toUpperCase();
+      if (!code || seen.has(code)) continue;
+      seen.add(code);
+      todo.push({ code: code, bank: r.bank });
+    }
+    if (!todo.length) {
+      Engine.refresh(); renderTable(); renderBanks();
+      _refreshBusy = false;
+      toast("数据已刷新");
+      return Promise.resolve();
+    }
+    toast("正在从银行抓取 " + todo.length + " 个产品的真实净值…");
+    const CONC = 4;
+    let idx = 0, got = 0;
+    const worker = async () => {
+      while (idx < todo.length) {
+        const t = todo[idx++];
+        try { if (await probeRealOne(t.bank, t.code)) got++; } catch (e) {}
+      }
+    };
+    const runners = [];
+    for (let i = 0; i < Math.min(CONC, todo.length); i++) runners.push(worker());
+    return Promise.all(runners).then(() => {
+      Engine.refresh(); renderTable(); renderBanks();
+      _refreshBusy = false;
+      if (got) toast("已为 " + got + " 个产品补全真实净值");
+      else toast("数据已刷新（" + todo.length + " 个产品未查到真实净值，仍显示演示）");
+    }, () => {
+      Engine.refresh(); renderTable(); renderBanks();
+      _refreshBusy = false;
+      toast("刷新完成（部分抓取失败）");
+    });
+  }
+
+  // 首屏静默补齐一次真实净值，节流 30 分钟（与设置弹层「每 30 分钟自动抓取一次」一致）
+  function autoFetchOnce() {
+    try {
+      const KEY = "observer_last_autofetch";
+      const last = parseInt(localStorage.getItem(KEY) || "0", 10);
+      if (last && Date.now() - last < 30 * 60 * 1000) return;
+      localStorage.setItem(KEY, String(Date.now()));
+    } catch (e) {}
+    refreshRealData();
+  }
+
   /* ---------- 设置弹层 ---------- */
   function openSettings() {
     const d = { banks: Engine.banks() };
@@ -2922,13 +3016,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   $("#btnPk").addEventListener("click", () => toast("PK 表现：可对比同系列同期限产品"));
 
   $("#btnRefresh").addEventListener("click", function () {
-    this.classList.add("spin");
-    setTimeout(() => {
-      Engine.refresh();
-      renderTable(); renderBanks();
-      toast("数据已刷新");
-      this.classList.remove("spin");
-    }, 400);
+    const el = this;
+    el.classList.add("spin");
+    refreshRealData().then(() => el.classList.remove("spin"), () => el.classList.remove("spin"));
   });
 
   $("#btnStar").addEventListener("click", function () {
@@ -3099,10 +3189,14 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   $("#settingsMask").addEventListener("click", e => {
     if (e.target === $("#settingsMask")) $("#settingsMask").classList.add("hidden");
   });
-  $("#btnRefreshModal").addEventListener("click", () => {
-    Engine.refresh();
-    openSettings(); renderTable(); renderBanks();
-    toast("已重新抓取");
+  $("#btnRefreshModal").addEventListener("click", function () {
+    const el = this;
+    const old = el.textContent;
+    el.disabled = true; el.textContent = "刷新中…";
+    refreshRealData().then(() => {
+      openSettings(); renderTable(); renderBanks();
+    }).then(() => { el.disabled = false; el.textContent = old; },
+            () => { el.disabled = false; el.textContent = old; });
   });
 
   $("#btnCloseDrawer").addEventListener("click", userCloseDrawer);
@@ -3143,6 +3237,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     renderBanks();
     markSortedHeader();
     renderTable();
+    autoFetchOnce();
   }
   init();
 })();
