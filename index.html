@@ -1513,8 +1513,13 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
           const trimmed = series.filter(p => p[0] >= seed.established);
           if (trimmed.length) series = trimmed;
         }
-        if (_real.manager) seed.manager = _real.manager;
-        if (_real.name) {
+        // 用户手工改过名称/管理人（或产品本身是自建）时，以用户输入为准，不用真实数据回写覆盖
+        const _patch = reg.patches[it.code] || {};
+        const _isCustom = it.origin === "custom";
+        const _nameUserSet = _isCustom || !!_patch.name;
+        const _mgrUserSet = _isCustom || _patch.manager !== undefined;
+        if (_real.manager && !_mgrUserSet) seed.manager = _real.manager;
+        if (_real.name && !_nameUserSet) {
           let _nm = _real.name;
           if (_real.manager && _nm.indexOf(_real.manager) === 0) _nm = _nm.slice(_real.manager.length).replace(/^[-·（\s]+/, "");
           seed.name = _nm;
