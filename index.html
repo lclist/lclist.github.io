@@ -104,6 +104,18 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 .bank-chip.active { background: #1e6fff; border-color: #1e6fff; color: #fff; font-weight: 600; }
 .bank-chip .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
 
+/* 手机 / 平板：17 家银行保持一行，手指左右滑动查看（桌面宽度富裕，仍自动换行） */
+@media (max-width: 1024px), (pointer: coarse) {
+  .bank-row {
+    flex-wrap: nowrap;
+    overflow-x: auto; overflow-y: hidden;
+    -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+    scrollbar-width: none; -ms-overflow-style: none;
+    padding-bottom: 10px;
+  }
+  .bank-row::-webkit-scrollbar { display: none; }
+}
+
 
 /* ---------- 表格 ---------- */
 /* 产品列表卡片：满屏宽度，左右不再留白 */
@@ -1858,8 +1870,20 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     }
     return counts;
   }
+  /* 银行行为横向滚动时：重绘后保留原有滚动位置；首次渲染则把当前银行居中，保证一定看得见 */
+  function keepBankScroll(row, prevScroll) {
+    if (!row || row.scrollWidth <= row.clientWidth + 1) return;
+    if (prevScroll > 0) { row.scrollLeft = Math.min(prevScroll, row.scrollWidth - row.clientWidth); return; }
+    const chip = row.querySelector(".bank-chip.active");
+    if (!chip) return;
+    const rr = row.getBoundingClientRect(), cr = chip.getBoundingClientRect();
+    const target = row.scrollLeft + (cr.left - rr.left) - (rr.width - cr.width) / 2;
+    row.scrollLeft = Math.max(0, Math.min(target, row.scrollWidth - row.clientWidth));
+  }
+
   function renderBanks() {
     const row = $("#bankRow");
+    const prevScroll = row ? row.scrollLeft : 0;
     const chips = state.banks || [];
     if (chips.length && !chips.some(b => b.key === state.bank)) state.bank = chips[0].key;
     const counts = bankCounts();
@@ -1870,6 +1894,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       return `<button class="bank-chip ${state.bank === b.key ? "active" : ""}" data-bank="${b.key}">
                 ${dot}${label}${cnt ? ` ${cnt}` : ""}</button>`;
     }).join("");
+    keepBankScroll(row, prevScroll);
   }
 
   /* ---------- 候选产品（真实抓取自工商银行披露页） ---------- */
@@ -2281,6 +2306,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
   function renderMgBanks() {
     const row = $("#mgBankRow");
+    const prevScroll = row ? row.scrollLeft : 0;
     if (!state.banks || !state.banks.length) state.banks = Engine.banks();
     const chips = state.banks || [];
     if (chips.length && !chips.some(b => b.key === state.bank)) state.bank = chips[0].key;
@@ -2303,6 +2329,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       const cnt = counts[b.key] || 0;
       return `<button class="bank-chip ${state.bank === b.key ? "active" : ""}" data-bank="${b.key}">${dot}${label}${cnt ? ` ${cnt}` : ""}</button>`;
     }).join("");
+    keepBankScroll(row, prevScroll);
   }
 
   function closeManage() {
@@ -2643,10 +2670,14 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     try {
       window.MULTI_REAL = window.MULTI_REAL || {};
       window.ICBC_REAL = window.ICBC_REAL || {};
+      let added = 0;
       const mapR = JSON.parse(localStorage.getItem("observer_lookup_real") || "{}");
-      for (const c in mapR) if (!window.MULTI_REAL[c]) window.MULTI_REAL[c] = mapR[c];
+      for (const c in mapR) if (!window.MULTI_REAL[c]) { window.MULTI_REAL[c] = mapR[c]; added++; }
       const mapI = JSON.parse(localStorage.getItem("observer_lookup_icbc") || "{}");
-      for (const c in mapI) if (!window.ICBC_REAL[c]) window.ICBC_REAL[c] = mapI[c];
+      for (const c in mapI) if (!window.ICBC_REAL[c]) { window.ICBC_REAL[c] = mapI[c]; added++; }
+      // 关键点：Engine 在自身脚本加载时就已 build() 过一次（早于本函数），那时这些本地缓存还没写进
+      // ICBC_REAL / MULTI_REAL，于是被判为「演示」。补一次重建，首屏才会直接显示真实净值。
+      if (added && window.Engine && typeof window.Engine.refresh === "function") window.Engine.refresh();
     } catch (e) {}
   }
 
