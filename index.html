@@ -2202,7 +2202,11 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     const _activeCodes = new Set(state.rows.map(r => r.code));
     let passedRows = candRowsAll().filter(r => state.passed.includes(r.code) && state.deletedCands.indexOf(r.code) < 0 && !_activeCodes.has(r.code));
     if (state.bank && state.bank !== "all") passedRows = passedRows.filter(r => r.bank === state.bank);
+    if (state.starOnly) passedRows = passedRows.filter(r => isFav(r.code));
     rows = rows.concat(passedRows);
+    // 关键修复：已通过候选是「追加」在已排序主列表之后，必须对整个合并列表重新排序，
+    // 否则 AF63636B 这类刚从候选升精选的产品会永远停在最后一行、表头排序对其无效。
+    rows = sortRows(rows);
     $("#footTip").textContent =
       `共 ${rows.length} 个产品 · 更新于 ${state.lastRefresh} · 点击产品名查看详情`;
     if (!rows.length) { tbody.innerHTML = ""; $("#emptyTip").classList.remove("hidden"); return; }
