@@ -447,7 +447,8 @@ td.cell-name { box-shadow: 6px 0 8px -6px rgba(90, 80, 180, .18); }
   /* 宽度富裕（平板 / 电脑）：产品名称一行显示，不再折成两行 */
   .col-name, td.cell-name { max-width: none; }
   .name-link { width: auto; max-width: none; display: inline-block; -webkit-line-clamp: unset; overflow: visible; white-space: nowrap; word-break: normal; }
-  .drawer { border-radius: 18px; margin-bottom: 6vh; max-height: 88vh; }
+  /* 详情抽屉在所有尺寸下满屏（顶部贴边、无底部留白） */
+  .drawer { border-radius: 0; margin-bottom: 0; max-height: 100vh; height: 100%; }
   .modal-lg { max-width: 560px; }
 }
 
@@ -2184,10 +2185,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
                    : r.source === "manual" ? `<span class="manual-badge">手填</span>` : "";
     const riskTag = /^R[1-5]$/.test(r.risk || "") ? `<span class="risk-badge ${r.risk.toLowerCase()}">${r.risk}</span>` : "";
     let action = "";
-    // 候选 tab 显示「通过」；精选/全部 tab 显示「详情」（打开净值曲线抽屉）。
+    // 仅候选 tab 显示「通过」；精选/全部 tab 不再显示按钮，点产品名称直接查看详情（编辑在管理页进行）。
     // 「退回」按钮已移除：产品移入精选后无需再在列表里退回（管理页「移动到候选」仍可做此操作）。
     if (state.tab === "candidate") action = `<button class="pass-btn" data-pass="1">通过</button>`;
-    else action = `<button class="detail-btn" data-detail="1">详情</button>`;
     const extra = action ? `<span class="pass-wrap">${action}</span>` : "";
     return `<tr data-code="${r.code}">
       <td class="cell-name"><span class="name-wrap"><a class="name-link" href="javascript:void(0)">${r.name}</a>${riskTag}</span>${star}${demoTag}${extra}</td>
@@ -3252,15 +3252,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       else if (pb.dataset.passBack) unpassCandidate(tr.dataset.code);
       return;
     }
-    const db = e.target.closest(".detail-btn");
-    if (db) {
-      const tr = db.closest("tr[data-code]"); if (!tr) return;
-      openDrawer(tr.dataset.code);
-      return;
-    }
-    // 点击「产品名称」直接进入编辑（修改产品信息）；其他单元格不触发
+    // 点击「产品名称」打开产品详情抽屉；其他单元格不触发
     const tr = e.target.closest("tr[data-code]");
-    if (tr && e.target.closest(".name-link")) openEdit(tr.dataset.code);
+    if (tr && e.target.closest(".name-link")) openDrawer(tr.dataset.code);
   });
 
   $("#btnStarDetail").addEventListener("click", () => {
