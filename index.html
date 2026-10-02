@@ -1696,6 +1696,11 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
     if (!v.name) return { ok: false, message: "请填写产品名称" };
     const _days = normDays(v.termDays);
     if (!_days) return { ok: false, message: "请填写持有天数（1~3650 的整数）" };
+    // 若该代码曾被「移入候选池 / 删除」而记入 reg.deleted，重新添加时必须清除该标记，
+    // 否则 catalogue() 仍会把它过滤掉，导致保存成功却不在精选/列表里出现（AF63636B 同类问题）。
+    if (reg.deleted.indexOf(v.code) >= 0) reg.deleted = reg.deleted.filter(c => c !== v.code);
+    // 避免 custom 数组残留同名项造成重复（曾被删除过的自定义产品重新添加时尤其要清理）
+    reg.custom = reg.custom.filter(c => c.code !== v.code);
     reg.custom.push({
       bank: v.bank, code: v.code, name: clean(v.name, 40), manager: clean(v.manager, 20),
       term: termFromDays(_days), termDays: _days, risk: RISKS.indexOf(v.risk) >= 0 ? v.risk : "R2",
@@ -2722,6 +2727,11 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
   function doSave(body) {
     $("#btnSaveEdit").disabled = true;
+    // 新添加（非编辑）时，若该代码曾在候选池被删除，需同步从 deletedCands 释放，避免重新加入后仍被候选过滤
+    if (!state.editCode && body.code && state.deletedCands.indexOf(body.code) >= 0) {
+      state.deletedCands = state.deletedCands.filter(c => c !== body.code);
+      persistDeletedCands();
+    }
     const d = Engine.saveProduct(state.editCode, body);
     $("#btnSaveEdit").disabled = false;
     if (d.ok === false) { showEditErr(d.message || "保存失败"); return; }
