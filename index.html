@@ -2016,6 +2016,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     const real = candRealSeries(c.prodId);
     if (real && real.kind !== "cash") {
       // 实时真实净值：与「精选」computeMetrics 同一套「日历天数」annAt 口径，保证数值一致
+      // 注意：本 script 块与引擎 IIFE 不同块，不能引用引擎内部 const addDays（跨块不可见，会 ReferenceError）
+      const _addDays = (ds, n) => { const d = new Date(ds + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
       const s = real.series.slice();
       const daily = []; let zero30 = 0, neg30 = 0;
       const navMap = {};
@@ -2025,7 +2027,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       while (cur <= endD) {
         let nav = lastNav, valued = 0;
         if (navMap[cur] !== undefined) { nav = navMap[cur]; lastNav = nav; valued = 1; }
-        arr.push({ date: cur, nav, v: valued }); cur = addDays(cur, 1);
+        arr.push({ date: cur, nav, v: valued }); cur = _addDays(cur, 1);
       }
       for (let i = 0; i < arr.length; i++) {
         const prev = i > 0 ? arr[i - 1].nav : arr[i].nav;
@@ -2049,8 +2051,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       const row = {
         code: c.prodId, name: c.prodName, fullName: c.prodName, manager: candCompany(c),
         bankName: candBankName(c), bank: "icbc", termLabel: "—", risk: "", bench: "",
-        navDate: s[LI][0], stock: "", quota: "", confirmDays: 1, confirmSrc: "推定",
-        established: (s[0] || {}).date || "", establishedSrc: "官网", riskSrc: "推定", docUrl: "",
+        navDate: arr[LI].date, stock: "", quota: "", confirmDays: 1, confirmSrc: "推定",
+        established: (s[0] || [])[0] || "", establishedSrc: "官网", riskSrc: "推定", docUrl: "",
         source: "real", kind: "nav", raw: c, mode: "real",
         dailyWan: num(+last.wan.toFixed(2)), d1: num(last.d1), y7: num(last.y7), y14: num(last.y14),
         y1m: num(last.y1m), y3m: num(last.y3m), y1y: num(last.y1y), since: num(last.since),
