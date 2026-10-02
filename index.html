@@ -85,6 +85,8 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 .head-icons .icon-btn.spin { animation: spin 1s linear infinite; }
 .pass-btn { display: inline-block; margin-left: 6px; padding: 2px 9px; border: none; border-radius: 10px; background: #1e6fff; color: #fff; font-size: calc(12px * var(--fs)); cursor: pointer; vertical-align: middle; }
 .pass-btn.back { background: #f2f3f8; color: #e0563b; }
+.detail-btn { display: inline-block; margin-left: 6px; padding: 2px 9px; border: 1px solid #c9cfe0; border-radius: 10px; background: #fff; color: #44506b; font-size: calc(12px * var(--fs)); cursor: pointer; vertical-align: middle; }
+.detail-btn:hover { background: #f2f5ff; border-color: #1e6fff; color: #1e6fff; }
 .pass-wrap { margin-left: 6px; display: inline-block; }
 .real-badge { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 8px; background: #e8f7ee; color: #0a9c46; font-size: calc(11px * var(--fs)); }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1762,7 +1764,14 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
     return { ok: true, message: "已保存" };
   }
   function saveProduct(code, body) {
-    if (code) return updateProduct(code, body);
+    if (code) {
+      code = (code || "").trim().toUpperCase();
+      const it = baseItems().find(x => x.code === code);
+      if (it) return updateProduct(code, body);
+      // 候选产品（不在目录中）保存编辑时，转为自定义产品入库：修改得以持久化，且不再重复出现在候选池
+      const v = Object.assign({}, body); v.code = code;
+      return addProduct(v);
+    }
     const v = Object.assign({}, body);
     v.code = (body.code || "").trim().toUpperCase();
     return addProduct(v);
@@ -2012,6 +2021,17 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     const r = (window.ICBC_REAL && window.ICBC_REAL[code]) || (window.MULTI_REAL && window.MULTI_REAL[code]) || null;
     return (r && r.series && r.series.length) ? r : null;
   }
+  // 候选产品（来自工行披露池）原始数据不含风险等级，这里从「已被查询/抓取的本地缓存」中回查，
+  // 让已被查看过的候选也能在名称右上角显示 R1/R2…（未经查询的候选无风险数据，则不显示）。
+  function candRiskOf(code) {
+    try {
+      const mapR = JSON.parse(localStorage.getItem("observer_lookup_real") || "{}");
+      if (mapR[code] && mapR[code].risk) return mapR[code].risk;
+      const mapI = JSON.parse(localStorage.getItem("observer_lookup_icbc") || "{}");
+      if (mapI[code] && mapI[code].risk) return mapI[code].risk;
+    } catch (e) {}
+    return "";
+  }
   function calcCand(c) {
     const real = candRealSeries(c.prodId);
     if (real && real.kind !== "cash") {
@@ -2050,7 +2070,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       const num = x => (x == null || isNaN(x)) ? null : x;
       const row = {
         code: c.prodId, name: c.prodName, fullName: c.prodName, manager: candCompany(c),
-        bankName: candBankName(c), bank: "icbc", termLabel: "—", risk: "", bench: "",
+        bankName: candBankName(c), bank: "icbc", termLabel: "—", risk: candRiskOf(c.prodId), bench: "",
         navDate: arr[LI].date, stock: "", quota: "", confirmDays: 1, confirmSrc: "推定",
         established: (s[0] || [])[0] || "", establishedSrc: "官网", riskSrc: "推定", docUrl: "",
         source: "real", kind: "nav", raw: c, mode: "real",
@@ -2099,7 +2119,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     const num = x => (x == null || isNaN(x)) ? null : x;
     const row = {
       code: c.prodId, name: c.prodName, fullName: c.prodName, manager: candCompany(c),
-      bankName: candBankName(c), bank: "icbc", termLabel: "—", risk: "", bench: "",
+      bankName: candBankName(c), bank: "icbc", termLabel: "—", risk: candRiskOf(c.prodId), bench: "",
       navDate: c.latestDate, stock: "", quota: "", confirmDays: 1, confirmSrc: "推定",
       established: (s[0] || {}).date || "", establishedSrc: "官网", riskSrc: "推定", docUrl: "",
       source: "real", kind: c.kind, raw: c, mode: "real",
@@ -2150,8 +2170,10 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
                    : r.source === "manual" ? `<span class="manual-badge">手填</span>` : "";
     const riskTag = /^R[1-5]$/.test(r.risk || "") ? `<span class="risk-badge ${r.risk.toLowerCase()}">${r.risk}</span>` : "";
     let action = "";
+    // 候选 tab 显示「通过」；精选/全部 tab 显示「详情」（打开净值曲线抽屉）。
+    // 「退回」按钮已移除：产品移入精选后无需再在列表里退回（管理页「移动到候选」仍可做此操作）。
     if (state.tab === "candidate") action = `<button class="pass-btn" data-pass="1">通过</button>`;
-    else if (state.passed.includes(r.code)) action = `<button class="pass-btn back" data-pass-back="1">退回</button>`;
+    else action = `<button class="detail-btn" data-detail="1">详情</button>`;
     const extra = action ? `<span class="pass-wrap">${action}</span>` : "";
     return `<tr data-code="${r.code}">
       <td class="cell-name"><span class="name-wrap"><a class="name-link" href="javascript:void(0)">${r.name}</a>${riskTag}</span>${star}${demoTag}${extra}</td>
@@ -2704,8 +2726,19 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   }
 
   function openEdit(code) {
-    const it = code ? state.mgItems.find(x => x.code === code) : null;
     state.editCode = code || null;
+    // 概览页直接点名称编辑时，管理目录（mgMeta/mgItems）可能尚未加载，先就地补全，避免「目录尚未加载」失败
+    if (!state.mgMeta || !state.mgMeta.banks) {
+      const d = Engine.mgProducts(state.bank || "all", state.sort || "name", state.order || "asc");
+      state.mgMeta = d.meta || {}; state.mgItems = d.items || [];
+    }
+    // 解析待编辑产品：优先管理目录，其次目录产品，最后候选真实数据（候选不在目录中，需从候选池回解）
+    let it = code ? state.mgItems.find(x => x.code === code) : null;
+    if (!it) {
+      const p = Engine.product(code);
+      if (p) it = p;
+      else { const cand = code ? buildCandProduct(code) : null; if (cand) it = cand.row; }
+    }
     $("#editTitle").textContent = code ? "修改产品" : "添加产品";
     const meta = state.mgMeta;
     if (!meta.banks) { toast("目录尚未加载"); return; }
@@ -3205,9 +3238,15 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       else if (pb.dataset.passBack) unpassCandidate(tr.dataset.code);
       return;
     }
-    // 只有点击「产品名称」才进入详情，其它单元格不触发
+    const db = e.target.closest(".detail-btn");
+    if (db) {
+      const tr = db.closest("tr[data-code]"); if (!tr) return;
+      openDrawer(tr.dataset.code);
+      return;
+    }
+    // 点击「产品名称」直接进入编辑（修改产品信息）；其他单元格不触发
     const tr = e.target.closest("tr[data-code]");
-    if (tr && e.target.closest(".name-link")) openDrawer(tr.dataset.code);
+    if (tr && e.target.closest(".name-link")) openEdit(tr.dataset.code);
   });
 
   $("#btnStarDetail").addEventListener("click", () => {
@@ -3325,9 +3364,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       syncMgCheckAll();
       return;
     }
-    // 只有「精选」标签下点击产品名才进入编辑；候选产品来自工行披露池，本身不可编辑
+    // 点击产品名进入编辑（修改产品信息），精选与候选标签均可；候选产品编辑保存后会转为自定义产品入库
     const tr = e.target.closest("tr[data-code]");
-    if (tr && e.target.closest(".name-link") && state.mgTab === "short") openEdit(tr.dataset.code);
+    if (tr && e.target.closest(".name-link")) openEdit(tr.dataset.code);
   });
 
   $$("#mgTable thead th[data-mgkey]").forEach(th =>
