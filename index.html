@@ -1032,6 +1032,7 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
 (() => {
   "use strict";
 
+
   const BANKS = {
     icbc:   { name: "工商银行", short: "工行", color: "#c8102e",
               sourceUrl: "https://www.icbc.com.cn/ICBC/%E7%90%86%E8%B4%A2/%E7%90%86%E8%B4%A2%E4%BA%A7%E5%93%81%E4%BF%A1%E6%81%AF%E6%8A%AB%E9%9C%B2/",
@@ -1050,8 +1051,8 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
               sourceUrl: "https://www.beijingbobwealth.com.cn/xxpl/cpgg/jzgg/index.html",
               note: "真实净值：抓取自该行官方理财净值披露接口，序列为官方披露值；成立日期取首个披露净值日。" },
     boc: { name: "中国银行", short: "中行", color: "#b01f24",
-              sourceUrl: "https://www.icbc.com.cn/webpage/finance/disclosure/",
-              note: "真实净值：抓取自该行官方理财净值披露接口，序列为官方披露值；成立日期取首个披露净值日。" },
+              sourceUrl: "https://ebsnew.boc.cn/bocphone/VueLocalCli4/bocFinanceDetail/index.html",
+              note: "真实净值：抓取自中行手机银行披露网关（ebsnew.boc.cn，无 CORS，须服务端/Serverless 代理）。净值型直接取单位净值；现金管理类（如惠享天天）nav 恒为 1，按万份收益从 1.0 复利合成单位净值。" },
     bosc: { name: "上海银行", short: "上海", color: "#005bac",
               sourceUrl: "https://www.bosc.cn/zh/dtjr/grlc/jzx/",
               note: "真实净值：抓取自该行官方理财净值披露接口，序列为官方披露值；成立日期取首个披露净值日。" },
