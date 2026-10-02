@@ -1965,12 +1965,12 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       const activeCodes = new Set();
       Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" }).forEach(r => activeCodes.add(r.code));
       state.passed.forEach(c => activeCodes.add(c));
-      candRowsAll().filter(r => !activeCodes.has(r.code)).forEach(add);
+      candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0).forEach(add);
     } else {
       const active = Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" });
       active.forEach(add);
       const _activeSet = new Set(active.map(r => r.code));
-      candRowsAll().filter(r => state.passed.includes(r.code) && !_activeSet.has(r.code)).forEach(add);
+      candRowsAll().filter(r => state.passed.includes(r.code) && !_activeSet.has(r.code) && state.deletedCands.indexOf(r.code) < 0).forEach(add);
     }
     return counts;
   }
