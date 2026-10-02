@@ -2021,8 +2021,20 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     const r = (window.ICBC_REAL && window.ICBC_REAL[code]) || (window.MULTI_REAL && window.MULTI_REAL[code]) || null;
     return (r && r.series && r.series.length) ? r : null;
   }
-  // 候选产品（来自工行披露池）原始数据不含风险等级，这里从「已被查询/抓取的本地缓存」中回查，
-  // 让已被查看过的候选也能在名称右上角显示 R1/R2…（未经查询的候选无风险数据，则不显示）。
+  // 候选产品（来自工行披露池）原始数据不含风险等级。风险等级来源优先级：
+  // ① 已被查询/抓取的本地缓存（observer_lookup_*，真实）优先；
+  // ② CAND_RISK_OVERRIDE（可由中国理财网等真实数据补抓后人工/脚本填入，覆盖以下推断）；
+  // ③ 否则按产品类型推断（现金管理=R1，固收=R2，含权益/全球配置/增强/混合=R3），与 App 既有规则一致。
+  // 说明：中国理财网 /prod/search 目前触发「二次校验」反爬，无法稳定批量抓取真实风险等级，故默认走推断；
+  //      一旦拿到真实值，往 CAND_RISK_OVERRIDE[prodId] 填 R1/R2/R3 即可覆盖，无需改动其他代码。
+  const CAND_RISK_OVERRIDE = {};
+  function candRiskInfer(c) {
+    const n = (c && c.prodName) || "";
+    if (c && c.kind === "cash") return "R1";
+    if (/现金管理|货币|现金/.test(n)) return "R1";
+    if (/权益|全球配置|增强|混合|优先股|ESG|量化|股票|股权|挂钩|结构性|衍生|进取|平衡|多资产|策略优选|目标止盈|打新|指数/.test(n)) return "R3";
+    return "R2";
+  }
   function candRiskOf(code) {
     try {
       const mapR = JSON.parse(localStorage.getItem("observer_lookup_real") || "{}");
@@ -2030,7 +2042,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       const mapI = JSON.parse(localStorage.getItem("observer_lookup_icbc") || "{}");
       if (mapI[code] && mapI[code].risk) return mapI[code].risk;
     } catch (e) {}
-    return "";
+    if (CAND_RISK_OVERRIDE[code]) return CAND_RISK_OVERRIDE[code];
+    const c = (window.CANDIDATES || []).find(x => x.prodId === code);
+    return c ? candRiskInfer(c) : "";
   }
   function calcCand(c) {
     const real = candRealSeries(c.prodId);
