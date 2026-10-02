@@ -2005,7 +2005,66 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   }
   function parsePct(v) { if (v == null) return null; const s = String(v).replace("%", "").trim(); const n = parseFloat(s); return isNaN(n) ? null : n; }
   function candAnn(a, b, n) { if (!b) return null; const r = a / b; if (r <= 0) return null; return (Math.pow(r, 365 / n) - 1) * 100; }
+  // 优先取实时真实净值序列（与「精选」computeMetrics 同源）：同一产品无论在「精选」还是「候选」查看，
+  // 成立以来年化等指标都应一致。实时序列从成立日(或更早)起算且为最新净值；快照则可能中段抓取、且用观测点个数年化，
+  // 二者会出现明显偏差（如 AF63636B：精选 6.41% vs 候选 9.72%）。
+  function candRealSeries(code) {
+    const r = (window.ICBC_REAL && window.ICBC_REAL[code]) || (window.MULTI_REAL && window.MULTI_REAL[code]) || null;
+    return (r && r.series && r.series.length) ? r : null;
+  }
   function calcCand(c) {
+    const real = candRealSeries(c.prodId);
+    if (real && real.kind !== "cash") {
+      // 实时真实净值：与「精选」computeMetrics 同一套「日历天数」annAt 口径，保证数值一致
+      const s = real.series.slice();
+      const daily = []; let zero30 = 0, neg30 = 0;
+      const navMap = {};
+      s.forEach(([ds, nav]) => { navMap[ds] = Number(nav) || 0; });
+      let lastNav = s[0][1], cur = s[0][0]; const endD = s[s.length - 1][0];
+      const arr = [];
+      while (cur <= endD) {
+        let nav = lastNav, valued = 0;
+        if (navMap[cur] !== undefined) { nav = navMap[cur]; lastNav = nav; valued = 1; }
+        arr.push({ date: cur, nav, v: valued }); cur = addDays(cur, 1);
+      }
+      for (let i = 0; i < arr.length; i++) {
+        const prev = i > 0 ? arr[i - 1].nav : arr[i].nav;
+        const ret = prev ? (arr[i].nav / prev - 1) : 0;
+        arr[i].wan = ret * arr[i].nav * 10000; arr[i].d1 = ret * 365 * 100;
+      }
+      const annAt = (i, n) => {
+        const j = Math.max(0, i - n), gap = i - j;
+        if (gap <= 0) return null;
+        const pv = arr[j].nav; if (!pv || pv <= 0) return null;
+        return Math.round((arr[i].nav / pv - 1) * 365 / gap * 100 * 100) / 100;
+      };
+      const LI = arr.length - 1;
+      arr.forEach((p, i) => {
+        p.y7 = annAt(i, 7); p.y14 = annAt(i, 14); p.y1m = annAt(i, 21);
+        p.y3m = annAt(i, 63); p.y1y = annAt(i, 252); p.since = annAt(i, i);
+        if (i >= arr.length - 30) { if (Math.abs(p.wan) < 0.005) zero30++; if (p.wan < -0.005) neg30++; }
+      });
+      const last = arr[LI] || { wan: 0, d1: 0, y7: 0, y14: 0, y1m: 0, y3m: 0, y1y: 0, since: 0 };
+      const num = x => (x == null || isNaN(x)) ? null : x;
+      const row = {
+        code: c.prodId, name: c.prodName, fullName: c.prodName, manager: candCompany(c),
+        bankName: candBankName(c), bank: "icbc", termLabel: "—", risk: "", bench: "",
+        navDate: s[LI][0], stock: "", quota: "", confirmDays: 1, confirmSrc: "推定",
+        established: (s[0] || {}).date || "", establishedSrc: "官网", riskSrc: "推定", docUrl: "",
+        source: "real", kind: "nav", raw: c, mode: "real",
+        dailyWan: num(+last.wan.toFixed(2)), d1: num(last.d1), y7: num(last.y7), y14: num(last.y14),
+        y1m: num(last.y1m), y3m: num(last.y3m), y1y: num(last.y1y), since: num(last.since),
+        zeroDays30: zero30, negDays30: neg30,
+      };
+      for (const [pre, win] of [["p7", "y7"], ["p14", "y14"], ["p30", "y1m"]]) {
+        const a = arr.filter(p => p.v === 1).map(p => p[win]).filter(v => v !== null && v !== undefined);
+        for (const [sfx, t] of [["25", 2.5], ["30", 3.0], ["35", 3.5], ["40", 4.0], ["45", 4.5], ["50", 5.0]]) {
+          row[pre + "_" + sfx] = a.length ? Math.round(a.filter(v => v > t).length / a.length * 100) : null;
+        }
+      }
+      return { row, daily: arr };
+    }
+    // —— 以下为原快照逻辑（无实时数据时回退；含 cash 与 nav 快照）——
     const s = (c.series || []).slice();
     const nav = c.kind === "nav";
     const daily = []; let zero30 = 0, neg30 = 0;
