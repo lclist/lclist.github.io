@@ -1840,6 +1840,29 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
 
   build();
 
+  /* 一次性数据修复：历史版本的「精选 → 移动到候选」是把产品从目录中删除。
+     由于中银理财的产品常被工行代销、代码与工行候选池重复，被删除的中国银行产品会立刻以
+     「工商银行候选」的身份复活。这里把仍留在“已删除/已隐藏”里的内置产品恢复回来，
+     并登记为「已退回候选」，让它们回到自己原本所属的银行。 */
+  (function repairDeletedSeeds() {
+    try {
+      if (localStorage.getItem("observer_tocand_repair1")) return;
+      localStorage.setItem("observer_tocand_repair1", "1");
+      const seedCodes = new Set(SEEDS.map(s => s[1]));
+      const bad = reg.deleted.filter(c => seedCodes.has(c))
+        .concat(reg.hidden.filter(c => seedCodes.has(c)));
+      if (!bad.length) return;
+      reg.deleted = reg.deleted.filter(c => !seedCodes.has(c));
+      reg.hidden = reg.hidden.filter(c => !seedCodes.has(c));
+      saveReg(); build();
+      const prev = JSON.parse(localStorage.getItem("observer_tocand") || "[]");
+      const merged = prev.slice();
+      bad.forEach(c => { if (merged.indexOf(c) < 0) merged.push(c); });
+      localStorage.setItem("observer_tocand", JSON.stringify(merged));
+      localStorage.setItem("observer_repaired_notice", String(bad.length));
+    } catch (e) {}
+  })();
+
   window.Engine = {
     BANKS, TERM_LABEL, TERM_DAYS, HOLIDAYS: Array.from(HOLIDAYS).sort(),
     products, banks, product, refresh: build,
@@ -1898,6 +1921,10 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     favs: JSON.parse(localStorage.getItem("observer_favs") || "[]"),
     passed: JSON.parse(localStorage.getItem("observer_passed") || "[]"),
     deletedCands: JSON.parse(localStorage.getItem("observer_deleted_cands") || "[]"),
+    // 由「精选」移到「候选」的产品代码。这些产品仍留在目录中（银行归属、真实净值、指标都不丢），
+    // 只是不在精选显示、改在候选显示。此前缺这个标记，退回的产品会退化工行候选池里的同名产品，
+    // 于是中国银行的产品被算成工商银行的候选。
+    toCand: JSON.parse(localStorage.getItem("observer_tocand") || "[]"),
     drawerCode: null,
     chartKey: "wan",
     range: "all",
@@ -1967,12 +1994,15 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       const activeCodes = new Set();
       Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" }).forEach(r => activeCodes.add(r.code));
       state.passed.forEach(c => activeCodes.add(c));
-      candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0).forEach(add);
+      candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0 && !isToCand(r.code)).forEach(add);
+      // 由精选退回的产品：按其原本所属银行计数（中国银行退回的仍算中国银行）
+      toCandRows().forEach(add);
     } else {
       const active = Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" });
-      active.forEach(add);
+      // 已退回候选的产品不再计入精选
+      active.filter(r => !isToCand(r.code)).forEach(add);
       const _activeSet = new Set(active.map(r => r.code));
-      candRowsAll().filter(r => state.passed.includes(r.code) && !_activeSet.has(r.code) && state.deletedCands.indexOf(r.code) < 0).forEach(add);
+      candRowsAll().filter(r => state.passed.includes(r.code) && !_activeSet.has(r.code) && state.deletedCands.indexOf(r.code) < 0 && !isToCand(r.code)).forEach(add);
     }
     return counts;
   }
@@ -2156,8 +2186,47 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   function candRowsAll() { if (_candCache) return _candCache; _candCache = (window.CANDIDATES || []).map(c => calcCand(c).row); return _candCache; }
   function buildCandProduct(code) { const c = (window.CANDIDATES || []).find(x => x.prodId === code); return c ? calcCand(c) : null; }
   function persistPassed() { try { localStorage.setItem("observer_passed", JSON.stringify(state.passed)); } catch (e) {} }
-  function passCandidate(code) { if (!state.passed.includes(code)) { state.passed.push(code); persistPassed(); } renderTable(); renderBanks(); toast("已通过，加入我的产品"); }
-  function unpassCandidate(code) { state.passed = state.passed.filter(c => c !== code); persistPassed(); renderTable(); renderBanks(); toast("已退回候选产品"); }
+
+  /* 「精选 → 候选」的产品仓库。
+     这些产品仍留在目录中，所以银行归属、真实净值、各项指标都不会丢；仅仅是精选里不显示、候选里显示。
+     若不用这份标记而靠「从目录删除」，产品会掉进工行候选池（CANDIDATES）——中银理财的产品常被工行代销、
+     代码与工行候选池重复，于是中国银行的产品就会摇身变成工商银行的候选产品。 */
+  function persistToCand() { try { localStorage.setItem("observer_tocand", JSON.stringify(state.toCand)); } catch (e) {} }
+  function isToCand(code) { return state.toCand.indexOf(code) >= 0; }
+  function catCodeSet() {
+    const s = new Set();
+    Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" }).forEach(r => s.add(r.code));
+    return s;
+  }
+  function toCandRows() {
+    if (!state.toCand.length) return [];
+    return Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" })
+      .filter(r => isToCand(r.code) && state.deletedCands.indexOf(r.code) < 0);
+  }
+  // 移出精选：在目录中的产品保留归属退回候选；不在目录中的产品（纯自定义）只能真删除。
+  // 返回 "keep"（保留归属进候选）/ "pool"（退回候选池）/ "del"（已删除）
+  function sendToCandidate(code, catSet) {
+    let inPassed = false;
+    if (state.passed.indexOf(code) >= 0) { state.passed = state.passed.filter(c => c !== code); persistPassed(); inPassed = true; }
+    const inCat = catSet ? catSet.has(code) : catCodeSet().has(code);
+    if (inCat) { if (!isToCand(code)) { state.toCand.push(code); persistToCand(); } return inPassed ? "keep" : "keep"; }
+    if (inPassed) return "pool";
+    Engine.deleteProduct(code);
+    return "del";
+  }
+
+  function passCandidate(code) {
+    if (!state.passed.includes(code)) { state.passed.push(code); persistPassed(); }
+    // 回到精选必须摘掉「已退回候选」标记，否则会同时出现在精选和候选两处
+    if (isToCand(code)) { state.toCand = state.toCand.filter(c => c !== code); persistToCand(); }
+    renderTable(); renderBanks(); toast("已通过，加入我的产品");
+  }
+  function unpassCandidate(code) {
+    state.passed = state.passed.filter(c => c !== code); persistPassed();
+    // 目录中的产品退回候选时同样要保留原银行归属
+    if (catCodeSet().has(code) && !isToCand(code)) { state.toCand.push(code); persistToCand(); }
+    renderTable(); renderBanks(); toast("已退回候选产品");
+  }
   function sortRows(rows) {
     const k = state.sort, ord = state.order === "asc" ? 1 : -1;
     const get = v => k === "name" ? v.name : Number(v[k]);
@@ -2217,13 +2286,15 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" }).forEach(r => activeCodes.add(r.code));
       state.passed.forEach(c => activeCodes.add(c));
       // 在管理页删掉的候选，概览页候选池必须同步消失（与 renderManage 同一套过滤条件）
-      let rows = candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0);
+      // 已退回候选的产品在此被排除，改由下面 toCandRows() 带着原银行归属进入候选
+      let rows = candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0 && !isToCand(r.code));
+      rows = rows.concat(toCandRows());
       if (state.bank && state.bank !== "all") rows = rows.filter(r => r.bank === state.bank);
       if (state.q) { const q = state.q.toLowerCase(); rows = rows.filter(r => (r.name + " " + r.code + " " + r.manager).toLowerCase().includes(q)); }
       if (state.starOnly) rows = rows.filter(r => isFav(r.code));
       rows = sortRows(rows);
       state.rows = rows;
-      $("#footTip").textContent = `候选产品共 ${rows.length} 个（真实抓取自工商银行披露页，点击「通过」加入我的产品）`;
+      $("#footTip").textContent = `候选产品共 ${rows.length} 个（点击「通过」加入我的产品）`;
       if (!rows.length) { tbody.innerHTML = ""; $("#emptyTip").classList.remove("hidden"); return; }
       $("#emptyTip").classList.add("hidden");
       tbody.innerHTML = rows.map(r => rowHtml(r)).join("");
@@ -2235,9 +2306,10 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     state.rows = data;
     state.lastRefresh = Engine.lastRefresh();
     state.holidays = Engine.HOLIDAYS;
-    let rows = state.rows.filter(r => !state.starOnly || isFav(r.code));
+    // 已退回候选的产品不属于精选
+    let rows = state.rows.filter(r => !state.starOnly || isFav(r.code)).filter(r => !isToCand(r.code));
     const _activeCodes = new Set(state.rows.map(r => r.code));
-    let passedRows = candRowsAll().filter(r => state.passed.includes(r.code) && state.deletedCands.indexOf(r.code) < 0 && !_activeCodes.has(r.code));
+    let passedRows = candRowsAll().filter(r => state.passed.includes(r.code) && state.deletedCands.indexOf(r.code) < 0 && !_activeCodes.has(r.code) && !isToCand(r.code));
     if (state.bank && state.bank !== "all") passedRows = passedRows.filter(r => r.bank === state.bank);
     if (state.starOnly) passedRows = passedRows.filter(r => isFav(r.code));
     rows = rows.concat(passedRows);
@@ -2530,11 +2602,14 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       const activeCodes = new Set();
       Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" }).forEach(r => activeCodes.add(r.code));
       state.passed.forEach(c => activeCodes.add(c));
-      srcRows = candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0);
+      srcRows = candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0 && !isToCand(r.code));
+      // 由精选退回的产品保留原银行归属计入候选
+      toCandRows().forEach(r => srcRows.push(r));
     } else {
-      srcRows = Engine.products({ bank: "all", tab: "short", sort: "name", order: "asc", q: "" });
+      srcRows = Engine.products({ bank: "all", tab: "short", sort: "name", order: "asc", q: "" })
+        .filter(r => !isToCand(r.code));
       const _activeCnt = new Set(srcRows.map(r => r.code));
-      candRowsAll().filter(r => state.passed.includes(r.code) && !_activeCnt.has(r.code)).forEach(r => srcRows.push(r));
+      candRowsAll().filter(r => state.passed.includes(r.code) && !_activeCnt.has(r.code) && !isToCand(r.code)).forEach(r => srcRows.push(r));
     }
     srcRows.forEach(r => { counts[r.bank] = (counts[r.bank] || 0) + 1; });
     row.innerHTML = chips.map(b => {
@@ -2604,17 +2679,18 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       const activeCodes = new Set();
       Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" }).forEach(r => activeCodes.add(r.code));
       state.passed.forEach(c => activeCodes.add(c));
-      rows = candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0);
+      rows = candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0 && !isToCand(r.code));
+      rows = rows.concat(toCandRows());
       if (state.bank && state.bank !== "all") rows = rows.filter(r => r.bank === state.bank);
       if (state.q) { const q = state.q.toLowerCase(); rows = rows.filter(r => (r.name + " " + r.code + " " + r.manager).toLowerCase().includes(q)); }
     } else {
       rows = Engine.products({
         bank: state.bank, tab: "short",
         sort: state.mgSort || "dailyWan", order: state.mgOrder, q: state.q || "",
-      });
+      }).filter(r => !isToCand(r.code));
       // 已通过的候选也并入精选（与概览一致），支持在管理页双向移动；同码已在目录中的不再并入，避免重复
       const _active = new Set(rows.map(r => r.code));
-      let passedRows = candRowsAll().filter(r => state.passed.includes(r.code) && state.deletedCands.indexOf(r.code) < 0 && !_active.has(r.code));
+      let passedRows = candRowsAll().filter(r => state.passed.includes(r.code) && state.deletedCands.indexOf(r.code) < 0 && !_active.has(r.code) && !isToCand(r.code));
       if (state.bank && state.bank !== "all") passedRows = passedRows.filter(r => r.bank === state.bank);
       rows = rows.concat(passedRows);
     }
@@ -2677,13 +2753,16 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   function mgBulkToCandidate() {
     const codes = mgSelectedCodes();
     if (!codes.length) { toast("请先勾选要移动的产品"); return; }
-    let nPass = 0, nDel = 0;
+    let nBack = 0, nDel = 0;
+    // 目录中的产品（含中国银行/建设银行等各行种子）退回候选时保留原银行归属：
+    // 它们只被标记，不被删除，因此不会出现「中国银行的产品变成工商银行候选」。
+    const catSet = catCodeSet();
     codes.forEach(code => {
-      if (state.passed.indexOf(code) >= 0) { unpassCandidate(code); nPass++; }
-      else { Engine.deleteProduct(code); nDel++; }
+      const r = sendToCandidate(code, catSet);
+      if (r === "del") nDel++; else nBack++;
     });
-    renderMgBanks(); renderManage();
-    toast(nPass ? `已退回 ${nPass} 个到候选池` + (nDel ? `，移除 ${nDel} 个自定义产品` : "") : `已移除 ${nDel} 个产品`);
+    renderMgBanks(); renderManage(); renderTable(); renderBanks();
+    toast(nBack ? `已移动 ${nBack} 个到候选产品` + (nDel ? `，移除 ${nDel} 个自定义产品` : "") : `已移除 ${nDel} 个产品`);
   }
 
   function mgBulkToShort() {
@@ -2703,6 +2782,10 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     if (!codes.length) { toast("请先勾选要删除的产品"); return; }
     showConfirm(`要删除 ${codes.length} 个产品吗？`, () => {
       codes.forEach(code => { if (state.deletedCands.indexOf(code) < 0) state.deletedCands.push(code); });
+      // 由精选退回的产品同样可以被彻底删掉：摘掉退回标记，避免它在候选里复活
+      const nRest = state.toCand.length;
+      state.toCand = state.toCand.filter(c => codes.indexOf(c) < 0);
+      if (state.toCand.length !== nRest) persistToCand();
       persistDeletedCands();
       // 同时刷新背后的概览页：候选 tab 与银行计数都要跟着少掉这些产品
       renderMgBanks(); renderManage(); renderTable(); renderBanks();
@@ -3339,9 +3422,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     t.classList.add("active");
     state.mgTab = t.dataset.mgtab;
     $("#btnAddProduct").classList.toggle("hidden", state.mgTab === "candidate");
-    // 候选池全部为工行产品，进入候选标签时强制落回工行，避免空列表
-    if (state.mgTab === "candidate") state.bank = "icbc";
-    else if (state.banks && state.banks.length && !state.banks.some(b => b.key === state.bank)) state.bank = state.banks[0].key;
+    // 候选标签不再强行切到工商银行：从「中国银行」等产品退回的候选仍属于原银行，
+    // 保留当前银行筛选，用户才能在中行标签下看到自己刚移过去的产品。
+    if (state.banks && state.banks.length && !state.banks.some(b => b.key === state.bank)) state.bank = state.banks[0].key;
     renderMgBanks(); renderManage();
   });
 
@@ -3415,6 +3498,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     data.favs = state.favs.slice();
     data.passed = state.passed.slice();
     data.deletedCands = state.deletedCands.slice();
+    data.toCand = state.toCand.slice();
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -3438,10 +3522,12 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       if (Array.isArray(data.favs)) { state.favs = data.favs.slice(); }
       if (Array.isArray(data.passed)) { state.passed = data.passed.slice(); }
       if (Array.isArray(data.deletedCands)) { state.deletedCands = data.deletedCands.slice(); }
+      if (Array.isArray(data.toCand)) { state.toCand = data.toCand.slice(); }
       try {
         localStorage.setItem("observer_favs", JSON.stringify(state.favs));
         localStorage.setItem("observer_passed", JSON.stringify(state.passed));
         localStorage.setItem("observer_deleted_cands", JSON.stringify(state.deletedCands));
+        localStorage.setItem("observer_tocand", JSON.stringify(state.toCand));
       } catch (e) {}
       afterManage(d);
     };
@@ -3505,6 +3591,13 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     markSortedHeader();
     renderTable();
     autoFetchOnce();
+    try {
+      const n = parseInt(localStorage.getItem("observer_repaired_notice") || "0", 10);
+      if (n > 0) {
+        localStorage.removeItem("observer_repaired_notice");
+        toast(`已恢复 ${n} 个被误移出精选的产品，按原银行归入候选`);
+      }
+    } catch (e) {}
   }
   init();
 })();
