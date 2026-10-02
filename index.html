@@ -1516,8 +1516,11 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
   function catalogue() {
     const hidden = new Set(reg.hidden);
     const deleted = new Set(reg.deleted);
+    const seen = new Set();
     return baseItems()
       .filter(it => !hidden.has(it.code) && !deleted.has(it.code))
+      // 同码去重（种子在前、优先保留）：防止「删除过的种子被当作自定义再次添加」等历史数据造成重复行
+      .filter(it => !seen.has(it.code) && seen.add(it.code))
       .map(it => {
         const p = reg.patches[it.code] || {};
         const merged = Object.assign({}, it, p);
@@ -1696,10 +1699,32 @@ window.MULTI_REAL = {"WPHX19M30014":{"name":"惠享-3年","manager":"上银理�
     if (!v.name) return { ok: false, message: "请填写产品名称" };
     const _days = normDays(v.termDays);
     if (!_days) return { ok: false, message: "请填写持有天数（1~3650 的整数）" };
-    // 若该代码曾被「移入候选池 / 删除」而记入 reg.deleted，重新添加时必须清除该标记，
-    // 否则 catalogue() 仍会把它过滤掉，导致保存成功却不在精选/列表里出现（AF63636B 同类问题）。
+    // 该代码已存在于目录（即曾被删除的内置种子 / 自定义产品）：走「恢复 + 字段更新」，
+    // 绝不能再插一条 custom，否则目录出现两条同码记录 → 精选重复显示两行（AF63636B 实例）。
+    const existed = baseItems().find(x => x.code === v.code);
+    if (existed) {
+      if (reg.deleted.indexOf(v.code) >= 0) reg.deleted = reg.deleted.filter(c => c !== v.code);
+      const patch = Object.assign({}, reg.patches[v.code] || {});
+      if (v.name) patch.name = clean(v.name, 40);
+      if (v.manager) patch.manager = clean(v.manager, 20);
+      patch.termDays = _days; patch.term = termFromDays(_days);
+      if (v.risk && RISKS.indexOf(v.risk) >= 0) patch.risk = v.risk;
+      if (v.established) patch.established = v.established;
+      if (v.confirm) patch.confirm = v.confirm;
+      if (v.stock !== undefined) patch.stock = v.stock || "";
+      if (v.quota) patch.quota = clean(v.quota, 40);
+      patch.edited = true;
+      if (existed.origin === "custom") {
+        const c = reg.custom.find(x => x.code === v.code);
+        if (c) Object.assign(c, patch, { code: v.code, bank: existed.bank });
+      } else {
+        reg.patches[v.code] = patch;
+      }
+      saveReg(); build();
+      return { ok: true, message: "已恢复" };
+    }
+    // 全新代码：清除可能残留的删除标记后正常新增
     if (reg.deleted.indexOf(v.code) >= 0) reg.deleted = reg.deleted.filter(c => c !== v.code);
-    // 避免 custom 数组残留同名项造成重复（曾被删除过的自定义产品重新添加时尤其要清理）
     reg.custom = reg.custom.filter(c => c.code !== v.code);
     reg.custom.push({
       bank: v.bank, code: v.code, name: clean(v.name, 40), manager: clean(v.manager, 20),
@@ -1933,8 +1958,10 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       state.passed.forEach(c => activeCodes.add(c));
       candRowsAll().filter(r => !activeCodes.has(r.code)).forEach(add);
     } else {
-      Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" }).forEach(add);
-      candRowsAll().filter(r => state.passed.includes(r.code)).forEach(add);
+      const active = Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" });
+      active.forEach(add);
+      const _activeSet = new Set(active.map(r => r.code));
+      candRowsAll().filter(r => state.passed.includes(r.code) && !_activeSet.has(r.code)).forEach(add);
     }
     return counts;
   }
@@ -2111,7 +2138,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     state.lastRefresh = Engine.lastRefresh();
     state.holidays = Engine.HOLIDAYS;
     let rows = state.rows.filter(r => !state.starOnly || isFav(r.code));
-    let passedRows = candRowsAll().filter(r => state.passed.includes(r.code) && state.deletedCands.indexOf(r.code) < 0);
+    const _activeCodes = new Set(state.rows.map(r => r.code));
+    let passedRows = candRowsAll().filter(r => state.passed.includes(r.code) && state.deletedCands.indexOf(r.code) < 0 && !_activeCodes.has(r.code));
     if (state.bank && state.bank !== "all") passedRows = passedRows.filter(r => r.bank === state.bank);
     rows = rows.concat(passedRows);
     $("#footTip").textContent =
@@ -2403,7 +2431,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       srcRows = candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0);
     } else {
       srcRows = Engine.products({ bank: "all", tab: "short", sort: "name", order: "asc", q: "" });
-      candRowsAll().filter(r => state.passed.includes(r.code)).forEach(r => srcRows.push(r));
+      const _activeCnt = new Set(srcRows.map(r => r.code));
+      candRowsAll().filter(r => state.passed.includes(r.code) && !_activeCnt.has(r.code)).forEach(r => srcRows.push(r));
     }
     srcRows.forEach(r => { counts[r.bank] = (counts[r.bank] || 0) + 1; });
     row.innerHTML = chips.map(b => {
@@ -2481,8 +2510,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
         bank: state.bank, tab: "short",
         sort: state.mgSort || "dailyWan", order: state.mgOrder, q: state.q || "",
       });
-      // 已通过的候选也并入精选（与概览一致），支持在管理页双向移动
-      let passedRows = candRowsAll().filter(r => state.passed.includes(r.code) && state.deletedCands.indexOf(r.code) < 0);
+      // 已通过的候选也并入精选（与概览一致），支持在管理页双向移动；同码已在目录中的不再并入，避免重复
+      const _active = new Set(rows.map(r => r.code));
+      let passedRows = candRowsAll().filter(r => state.passed.includes(r.code) && state.deletedCands.indexOf(r.code) < 0 && !_active.has(r.code));
       if (state.bank && state.bank !== "all") passedRows = passedRows.filter(r => r.bank === state.bank);
       rows = rows.concat(passedRows);
     }
@@ -2727,10 +2757,18 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
   function doSave(body) {
     $("#btnSaveEdit").disabled = true;
-    // 新添加（非编辑）时，若该代码曾在候选池被删除，需同步从 deletedCands 释放，避免重新加入后仍被候选过滤
-    if (!state.editCode && body.code && state.deletedCands.indexOf(body.code) >= 0) {
-      state.deletedCands = state.deletedCands.filter(c => c !== body.code);
-      persistDeletedCands();
+    // 新添加（非编辑）时，同步清理该代码在候选侧的残留状态：
+    // deletedCands（曾在候选池删除）与 passed（曾通过候选加入精选）都要释放，
+    // 否则同一代码会同时以「自定义产品」和「已通过候选」两条路径重复显示。
+    if (!state.editCode && body.code) {
+      if (state.deletedCands.indexOf(body.code) >= 0) {
+        state.deletedCands = state.deletedCands.filter(c => c !== body.code);
+        persistDeletedCands();
+      }
+      if (state.passed.indexOf(body.code) >= 0) {
+        state.passed = state.passed.filter(c => c !== body.code);
+        persistPassed();
+      }
     }
     const d = Engine.saveProduct(state.editCode, body);
     $("#btnSaveEdit").disabled = false;
