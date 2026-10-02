@@ -1052,7 +1052,7 @@ window.CEB_REAL = {"EB1088":{"name":"阳光金月添利1号","manager":"光大�
               note: "真实净值：经 Serverless 代理实时抓取自农行理财e站（ewealth.abchina.com.cn）官方净值披露接口与产品信息接口，序列为官方披露值（净值型，成立日前认购期占位行已自动按成立日过滤）；风险等级/业绩比较基准/最短持有期来自产品信息接口。接口免签名免 Token。" },
     bob: { name: "北京银行", short: "北京", color: "#e0241b",
               sourceUrl: "https://www.beijingbobwealth.com.cn/xxpl/cpgg/jzgg/index.html",
-              note: "真实净值：抓取自该行官方理财净值披露接口，序列为官方披露值；成立日期取首个披露净值日。" },
+              note: "真实净值：经 Serverless 代理实时抓取自北银理财信披站（beijingbobwealth.com.cn）官方净值披露接口与产品信息接口，序列为官方披露值；现金管理类按万份收益从 1.0 复利合成单位净值，非现金管理类取单位净值。含风险等级/业绩比较基准/最短持有期/登记编码。接口免签名免 Token。" },
     boc: { name: "中国银行", short: "中行", color: "#b01f24",
               sourceUrl: "https://ebsnew.boc.cn/bocphone/VueLocalCli4/bocFinanceDetail/index.html",
               note: "真实净值：抓取自中行手机银行披露网关（ebsnew.boc.cn，无 CORS，须服务端/Serverless 代理）。净值型直接取单位净值；现金管理类（如惠享天天）nav 恒为 1，按万份收益从 1.0 复利合成单位净值。" },
@@ -3243,9 +3243,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
   // 单个产品：icbc 走 Serverless 代理 / 本地 server 实时抓取，其余先查本地内嵌快照
   function probeRealOne(bank, code) {
-    // 工行、农行有稳定的实时 Serverless 抓取通道，刷新/补齐净值时优先走服务端实时抓取；
+    // 工行、农行、北京银行有稳定的实时 Serverless 抓取通道，刷新/补齐净值时优先走服务端实时抓取；
     // 其余银行沿用内嵌真实快照（避免对不稳定的上游频繁打请求）。
-    const liveBanks = bank === "icbc" || bank === "abc";
+    const liveBanks = bank === "icbc" || bank === "abc" || bank === "bob";
     const tryOne = (bk) => {
       const p = liveBanks
         ? fetchFromServer(bk, code).catch(() => doLookupProduct(bk, code))
