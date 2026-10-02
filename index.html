@@ -1048,8 +1048,8 @@ window.CEB_REAL = {"EB1088":{"name":"阳光金月添利1号","manager":"光大�
               note: "微众银行官方无统一净值披露接口；使用基于真实产品清单（中国理财网登记口径、万份收益）的演示净值序列，最新净值与披露值对齐。" },
     /* MULTI_BANKS_BEGIN */
     abc: { name: "农业银行", short: "农行", color: "#009b4d",
-              sourceUrl: "https://ewealth.abchina.com/fs/NetValue/",
-              note: "真实净值：抓取自该行官方理财净值披露接口，序列为官方披露值；成立日期取首个披露净值日。" },
+              sourceUrl: "https://ewealth.abchina.com.cn/fs/NetValue/",
+              note: "真实净值：经 Serverless 代理实时抓取自农行理财e站（ewealth.abchina.com.cn）官方净值披露接口与产品信息接口，序列为官方披露值（净值型，成立日前认购期占位行已自动按成立日过滤）；风险等级/业绩比较基准/最短持有期来自产品信息接口。接口免签名免 Token。" },
     bob: { name: "北京银行", short: "北京", color: "#e0241b",
               sourceUrl: "https://www.beijingbobwealth.com.cn/xxpl/cpgg/jzgg/index.html",
               note: "真实净值：抓取自该行官方理财净值披露接口，序列为官方披露值；成立日期取首个披露净值日。" },
@@ -1094,12 +1094,12 @@ window.CEB_REAL = {"EB1088":{"name":"阳光金月添利1号","manager":"光大�
 
   const TERM_LABEL = {
     daily: "最短持有1天", "7d": "最短持有7天", "14d": "最短持有14天",
-    "30d": "最短持有30天", weekly: "每周开放", monthly: "每月开放",
+    "30d": "最短持有30天", "90d": "最短持有90天", weekly: "每周开放", monthly: "每月开放",
     quarterly: "每季开放", halfyear: "每半年开放",
   };
-  const TERM_DAYS = { daily: 1, "7d": 7, "14d": 14, "30d": 30, weekly: 7,
+  const TERM_DAYS = { daily: 1, "7d": 7, "14d": 14, "30d": 30, "90d": 90, weekly: 7,
                       monthly: 30, quarterly: 91, halfyear: 182 };
-  const TERM_SHORT = { daily: "1天", "7d": "7天", "14d": "14天", "30d": "30天",
+  const TERM_SHORT = { daily: "1天", "7d": "7天", "14d": "14天", "30d": "30天", "90d": "90天",
                        weekly: "双周", monthly: "月开", quarterly: "季开", halfyear: "半年" };
   const STOCKS = ["", "ok", "tight", "out"];
   const STOCK_LABEL = { "": "未知", ok: "有额度", tight: "额度紧张", out: "售罄" };
@@ -1187,6 +1187,7 @@ window.CEB_REAL = {"EB1088":{"name":"阳光金月添利1号","manager":"光大�
     ["abc", "NYTXLDKJCX360", "农银理财“农银同心·灵动”360天科技创新人民币理财产品", "农银理财", "daily", "R2", "2021-03-18", "—", 0, 0, false],
     ["abc", "NYJXLD270", "农银理财“农银匠心·灵动”270天人民币理财产品", "农银理财", "daily", "R2", "2021-03-23", "—", 0, 0, false],
     ["abc", "NYTXLDYXPZ90", "农银理财“农银同心·灵动”90天优选配置人民币理财产品（乡村振兴惠农）", "农银理财", "daily", "R2", "2021-03-26", "—", 0, 0, false],
+    ["abc", "NYJXLDKJLH90", "农银理财农银匠心·灵动90天理财产品（科技领航）", "农银理财", "90d", "R2", "2026-05-13", "—", 0, 0, false],
     ["abc", "NYTXLDYXPZ150", "农银理财“农银同心·灵动”150天优选配置人民币理财产品", "农银理财", "daily", "R2", "2021-04-02", "—", 0, 0, false],
     ["abc", "NYJQLDGSZQ300", "农银理财“农银进取·灵动”300天固收增强人民币理财产品", "农银理财", "daily", "R2", "2021-04-06", "—", 0, 0, false],
     ["abc", "NYTXLDJZJX540", "农银理财“农银同心·灵动”540天价值精选人民币理财产品", "农银理财", "daily", "R2", "2021-04-07", "—", 0, 0, false],
@@ -3242,8 +3243,11 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
   // 单个产品：icbc 走 Serverless 代理 / 本地 server 实时抓取，其余先查本地内嵌快照
   function probeRealOne(bank, code) {
+    // 工行、农行有稳定的实时 Serverless 抓取通道，刷新/补齐净值时优先走服务端实时抓取；
+    // 其余银行沿用内嵌真实快照（避免对不稳定的上游频繁打请求）。
+    const liveBanks = bank === "icbc" || bank === "abc";
     const tryOne = (bk) => {
-      const p = (bk === "icbc")
+      const p = liveBanks
         ? fetchFromServer(bk, code).catch(() => doLookupProduct(bk, code))
         : doLookupProduct(bk, code);
       return Promise.resolve(p)
