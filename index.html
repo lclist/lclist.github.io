@@ -1066,7 +1066,7 @@ window.BOB_REAL = {"132040B":{"name":"招睿月添利30天持有期2号","manage
               note: "真实净值：经 Serverless 代理实时抓取自上海银行理财净值披露接口（www.bosc.cn，接口 qryMCFinanceNetProHisValueForPersonPage，按 prdCode 精确过滤），序列为官方披露单位净值；成立日期取首个披露净值日，最短持有期按产品名（如「60天」「X月」「Y年」）推断。含管理人（taShortName）/业绩比较基准（compareMark）；上游响应无风险等级与登记编码字段，故留空。接口免签名免 Token，但上游响应时不带 CORS 头，须走 Serverless 代理。" },
     ccb: { name: "建设银行", short: "建行", color: "#004ea2",
               sourceUrl: "https://tool3.ccb.cn/cn/finance/products/net_value/list.html",
-              note: "真实净值：抓取自该行官方理财净值披露接口，序列为官方披露值；成立日期取首个披露净值日。" },
+              note: "真实净值：经 Serverless 代理实时抓取自建行理财净值披露网关（tool3.ccb.cn/tran/WCCMainPlatV5，免登录免签名，仅校验 Referer）。产品信息用 TXCODE=NLC165 按产品代码精确过滤（含名称/发行机构/最新披露单位净值）；历史净值取官方静态披露文件 /newsinfo/finance/{产品码}{市场ID}{机构ID}40{口径}.txt，口径依次为 09 单位净值 → 10 累计净值 → 15 万份收益（现金管理类因单位净值恒为 1，改用万份收益从 1.0 复利合成）。成立日期取首个披露净值日，最短持有期按产品名推断。建行详情接口（NLC164）需登录，故风险等级/登记编码留空。部分封闭式产品尚未生成净值披露文件，此时只回填真实的名称与发行机构，不编造净值。" },
     ceb: { name: "光大银行", short: "光大", color: "#8e3bc4",
               sourceUrl: "https://www.cebbank.com/site/gryw/yglc/lsjz/index.html",
               note: "真实净值：光大官网（www.cebbank.com）的净值接口有瑞数动态令牌防护，浏览器直连与服务端代理均无法通过，故分两路取数——① 工行代销的光大理财份额（EW…G/D 等）经 Serverless 代理实时抓取；② 光大自身渠道代码（如 EW4621A、EB1088）由本地浏览器抓取后内嵌为真实快照。两者均为官方披露值。" },
@@ -3132,8 +3132,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   function fetchFromServer(bank, code) {
     // 上海银行上游首刷极慢（实测冷拉取 ~60s），默认 20s 会在 Worker 返回前被前端 abort，
     // 故对其放宽到 120s；浦发要逐层缩短关键字去招行目录检索（冷拉取实测 ~10s），放宽到 45s；
-    // 其它银行沿用默认 20s。
-    const tm = (bank === "bosc") ? 120000 : (bank === "spdb") ? 45000 : 20000;
+    // 建行代码若不在产品目录里需并行试 16 个市场 ID（实测 ~3s），放宽到 30s；其它银行沿用默认 20s。
+    const tm = (bank === "bosc") ? 120000 : (bank === "spdb") ? 45000 : (bank === "ccb") ? 30000 : 20000;
     const q = "?bank=" + encodeURIComponent(bank) + "&code=" + encodeURIComponent(code);
     return API_BASE
       ? httpJson(API_BASE + "/api/fetch" + q, tm).catch(() => httpJson("./api/fetch" + q, tm))
@@ -3162,7 +3162,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       });
     }
     const q = "?bank=" + encodeURIComponent(bank) + "&code=" + encodeURIComponent(code);
-    const tm = (bank === "bosc") ? 120000 : (bank === "spdb") ? 45000 : 20000;
+    const tm = (bank === "bosc") ? 120000 : (bank === "spdb") ? 45000 : (bank === "ccb") ? 30000 : 20000;
     return API_BASE
       ? httpJson(API_BASE + "/api/meta" + q, tm).catch(() => httpJson("./api/meta" + q, tm))
       : httpJson("./api/meta" + q, tm);
@@ -3255,9 +3255,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
   // 单个产品：icbc 走 Serverless 代理 / 本地 server 实时抓取，其余先查本地内嵌快照
   function probeRealOne(bank, code) {
-    // 工行、农行、北京银行、招行、上海银行、浦发有稳定的实时 Serverless 抓取通道，刷新/补齐净值时优先走服务端实时抓取；
+    // 工行、农行、北京银行、招行、上海银行、浦发、建行有稳定的实时 Serverless 抓取通道，刷新/补齐净值时优先走服务端实时抓取；
     // 其余银行沿用内嵌真实快照（避免对不稳定的上游频繁打请求）。
-    const liveBanks = bank === "icbc" || bank === "abc" || bank === "bob" || bank === "cmb" || bank === "bosc" || bank === "spdb";
+    const liveBanks = bank === "icbc" || bank === "abc" || bank === "bob" || bank === "cmb" || bank === "bosc" || bank === "spdb" || bank === "ccb";
     const tryOne = (bk) => {
       const knownBaked = window.MULTI_REAL && window.MULTI_REAL[code] && window.MULTI_REAL[code].series && window.MULTI_REAL[code].series.length;
       const p = (liveBanks && !knownBaked)
