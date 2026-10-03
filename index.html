@@ -1077,8 +1077,8 @@ window.BOB_REAL = {"132040B":{"name":"招睿月添利30天持有期2号","manage
               sourceUrl: "https://www.icbc.com.cn/webpage/finance/disclosure/",
               note: "真实净值：抓取自该行官方理财净值披露接口，序列为官方披露值；成立日期取首个披露净值日。" },
     cmb: { name: "招商银行", short: "招行", color: "#cc0000",
-              sourceUrl: "https://www.icbc.com.cn/webpage/finance/disclosure/",
-              note: "真实净值：抓取自该行官方理财净值披露接口，序列为官方披露值；成立日期取首个披露净值日。" },
+              sourceUrl: "https://cfweb.paas.cmbchina.com/personal/prodvalue",
+              note: "真实净值：抓取自招商银行 cfweb 理财超市接口（国密 SM4-ECB 签名，CORS 仅限自身域名，须服务端/Serverless 代理）。净值型取单位净值；代销产品按 saaCod+funCod 取净值序列。产品信息含发行机构/风险等级/登记编码/最短持有期。" },
     cmbc: { name: "民生银行", short: "民生", color: "#0a7a4a",
               sourceUrl: "https://www.icbc.com.cn/webpage/finance/disclosure/",
               note: "真实净值：抓取自该行官方理财净值披露接口，序列为官方披露值；成立日期取首个披露净值日。" },
@@ -3252,7 +3252,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   function probeRealOne(bank, code) {
     // 工行、农行、北京银行有稳定的实时 Serverless 抓取通道，刷新/补齐净值时优先走服务端实时抓取；
     // 其余银行沿用内嵌真实快照（避免对不稳定的上游频繁打请求）。
-    const liveBanks = bank === "icbc" || bank === "abc" || bank === "bob";
+    const liveBanks = bank === "icbc" || bank === "abc" || bank === "bob" || bank === "cmb";
     const tryOne = (bk) => {
       const knownBaked = window.MULTI_REAL && window.MULTI_REAL[code] && window.MULTI_REAL[code].series && window.MULTI_REAL[code].series.length;
       const p = (liveBanks && !knownBaked)
