@@ -1063,7 +1063,7 @@ window.BOB_REAL = {"132040B":{"name":"招睿月添利30天持有期2号","manage
               note: "真实净值：抓取自中行手机银行披露网关（ebsnew.boc.cn，无 CORS，须服务端/Serverless 代理）。净值型直接取单位净值；现金管理类（如惠享天天）nav 恒为 1，按万份收益从 1.0 复利合成单位净值。" },
     bosc: { name: "上海银行", short: "上海", color: "#005bac",
               sourceUrl: "https://www.bosc.cn/zh/dtjr/grlc/jzx/",
-              note: "真实净值：抓取自该行官方理财净值披露接口，序列为官方披露值；成立日期取首个披露净值日。" },
+              note: "真实净值：经 Serverless 代理实时抓取自上海银行理财净值披露接口（www.bosc.cn，接口 qryMCFinanceNetProHisValueForPersonPage，按 prdCode 精确过滤），序列为官方披露单位净值；成立日期取首个披露净值日，最短持有期按产品名（如「60天」「X月」「Y年」）推断。含管理人（taShortName）/业绩比较基准（compareMark）；上游响应无风险等级与登记编码字段，故留空。接口免签名免 Token，但上游响应时不带 CORS 头，须走 Serverless 代理。" },
     ccb: { name: "建设银行", short: "建行", color: "#004ea2",
               sourceUrl: "https://tool3.ccb.cn/cn/finance/products/net_value/list.html",
               note: "真实净值：抓取自该行官方理财净值披露接口，序列为官方披露值；成立日期取首个披露净值日。" },
@@ -3130,10 +3130,13 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   }
 
   function fetchFromServer(bank, code) {
+    // 上海银行上游首刷极慢（实测冷拉取 ~60s），默认 20s 会在 Worker 返回前被前端 abort，
+    // 故对其放宽到 120s；其它银行沿用默认 20s。
+    const tm = (bank === "bosc") ? 120000 : 20000;
     const q = "?bank=" + encodeURIComponent(bank) + "&code=" + encodeURIComponent(code);
     return API_BASE
-      ? httpJson(API_BASE + "/api/fetch" + q).catch(() => httpJson("./api/fetch" + q))
-      : httpJson("./api/fetch" + q);
+      ? httpJson(API_BASE + "/api/fetch" + q, tm).catch(() => httpJson("./api/fetch" + q, tm))
+      : httpJson("./api/fetch" + q, tm);
   }
 
   // 已知 ICBC 产品的权威元数据种子（与 serverless Worker 同步；本地优先命中，无需联网即可补全 风险/成立日/持有天数）
@@ -3158,9 +3161,10 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       });
     }
     const q = "?bank=" + encodeURIComponent(bank) + "&code=" + encodeURIComponent(code);
+    const tm = (bank === "bosc") ? 120000 : 20000;
     return API_BASE
-      ? httpJson(API_BASE + "/api/meta" + q).catch(() => httpJson("./api/meta" + q))
-      : httpJson("./api/meta" + q);
+      ? httpJson(API_BASE + "/api/meta" + q, tm).catch(() => httpJson("./api/meta" + q, tm))
+      : httpJson("./api/meta" + q, tm);
   }
 
   // 把抓取结果填充到表单，并注入真实净值（写入 ICBC_REAL / MULTI_REAL 并持久化）
@@ -3252,7 +3256,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   function probeRealOne(bank, code) {
     // 工行、农行、北京银行有稳定的实时 Serverless 抓取通道，刷新/补齐净值时优先走服务端实时抓取；
     // 其余银行沿用内嵌真实快照（避免对不稳定的上游频繁打请求）。
-    const liveBanks = bank === "icbc" || bank === "abc" || bank === "bob" || bank === "cmb";
+    const liveBanks = bank === "icbc" || bank === "abc" || bank === "bob" || bank === "cmb" || bank === "bosc";
     const tryOne = (bk) => {
       const knownBaked = window.MULTI_REAL && window.MULTI_REAL[code] && window.MULTI_REAL[code].series && window.MULTI_REAL[code].series.length;
       const p = (liveBanks && !knownBaked)
