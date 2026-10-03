@@ -871,7 +871,7 @@ try { var _fs = parseFloat(localStorage.getItem("observer_fs")); if (_fs > 0) do
       <label class="fld f-nonicbc"><span>目标年化（%）</span>
         <input id="fTarget" type="number" step="0.01" min="0.01" max="20" inputmode="decimal" placeholder="如 2.85"></label>
       <label class="fld"><span>成立日期</span><input id="fEst" type="date">
-        <em class="fld-hint">工行产品自动取产品说明书；说明书不可得时按最早净值日，可在此更正</em>
+        <em class="fld-hint">必填。抓取到真实净值时自动取最早净值日；抓不到时请手工填写（产品说明书/发行公告可查），留空不会再用假日期兜底</em>
       </label>
       <label class="fld"><span>确认天数 T+N</span>
         <input id="fConfirm" type="number" step="1" min="1" max="10" inputmode="numeric" placeholder="留空按产品说明书">
@@ -1341,7 +1341,10 @@ window.BOB_REAL = {"132040B":{"name":"招睿月添利30天持有期2号","manage
     const muDaily = annual / 365.0;
     const sigma = (vol * VOL_SCALE / 100.0) / Math.sqrt(365.0);
     let start = addDays(end, -(days + 10));
-    start = start > addDays(seed.established, -3) ? start : addDays(seed.established, -3);
+    // 成立日期可能为空（未知时不编造）：此时就用默认窗口起点，避免 addDays("") 产生 Invalid Date
+    if (seed.established) {
+      start = start > addDays(seed.established, -3) ? start : addDays(seed.established, -3);
+    }
 
     const series = [];
     let nav = 1.0;
@@ -1518,7 +1521,8 @@ window.BOB_REAL = {"132040B":{"name":"招睿月添利30天持有期2号","manage
       out.push({
         bank: c.bank, code: c.code, name: c.name, manager: c.manager || "", term: c.term || "daily",
         termDays: c.termDays || null,
-        risk: c.risk || "R2", established: c.established || "2026-01-01",
+        // 成立日期未知时留空（展示为「--」），绝不编造成 2026-01-01 这类假日期
+        risk: c.risk || "R2", established: c.established || "",
         benchmark: c.benchmark || "—", target: c.target || 0.028, vol: c.vol || 0.6,
         is_long: !!c.is_long, builtin: false, origin: "custom",
         confirm: c.confirm || null, stock: c.stock || "", quota: c.quota || "",
@@ -1742,7 +1746,7 @@ window.BOB_REAL = {"132040B":{"name":"招睿月添利30天持有期2号","manage
     reg.custom.push({
       bank: v.bank, code: v.code, name: clean(v.name, 40), manager: clean(v.manager, 20),
       term: termFromDays(_days), termDays: _days, risk: RISKS.indexOf(v.risk) >= 0 ? v.risk : "R2",
-      established: v.established || "2026-01-01", target: isFinite(v.target) && v.target > 0 ? v.target : 0.028,
+      established: v.established || "", target: isFinite(v.target) && v.target > 0 ? v.target : 0.028,
       confirm: v.confirm || null, stock: v.stock || "", quota: clean(v.quota, 40),
       benchmark: "—",
     });
@@ -2372,7 +2376,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       <span>${r.termLabel}</span>
       <span class="warn">${r.risk}</span>
       <span>T+${cn}确认${csrc === "说明书" ? "" : `<i class="cnf-src">${csrc}</i>`}</span>
-      <span>${r.established}成立</span>
+      <span>${r.established || "成立日期未知"}成立</span>
       <span>截止至17:00</span>`;
     $("#dBench").textContent = "业绩比较基准：" + r.benchmark;
     $("#dNavDate").textContent = `（${r.navDate}）`;
@@ -2396,7 +2400,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
        : manual ? "数据来源：用户提供的真实净值（手动维护）"
        : "数据来源：演示净值序列（真实接口需银行授权）")
       + ` · 风险 ${r.risk}（${srcTag(r.riskSrc)}）`
-      + ` · 成立日 ${r.established}（${srcTag(r.establishedSrc)}）`
+      + ` · 成立日 ${r.established || "未知"}（${srcTag(r.establishedSrc)}）`
       + ` · 确认 T+${cn}（${srcTag(csrc)}）`
       + " · 更新于 " + state.lastRefresh
       + (r.docUrl ? ` · <a class="src-link" href="${r.docUrl}" target="_blank" rel="noopener">产品说明书</a>` : "")
@@ -2942,6 +2946,12 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     const holdDays = parseInt(holdRaw, 10);
     if (!holdRaw || isNaN(holdDays) || holdDays < 1 || holdDays > 3650) {
       showEditErr("请填写持有天数（1~3650 的整数）"); return;
+    }
+    // 成立日期必填：抓取不到时必须手工填（产品说明书/发行公告可查）。
+    // 历史 bug：原来留空会静默存成 2026-01-01，导致「成立天数」与演示曲线起点全是假的。
+    const estRaw = $("#fEst").value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(estRaw)) {
+      showEditErr("请填写成立日期（抓取不到时手工填写，产品说明书/发行公告可查）"); return;
     }
     const body = {
       bank, name, manager: $("#fManager").value.trim(),
