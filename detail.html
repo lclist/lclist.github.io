@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>理财产品概览 · 理财产品概览</title>
+<title>产品详情 · 理财产品概览</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>📊</text></svg>">
 <style>
 /* 理财产品一览表 —— 复刻观测站风格：紫色渐变 + 移动优先 */
@@ -4146,9 +4146,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 </script>
 
 <script>
-/* 视图引导：本页为「理财产品概览」单页展示，加载后自动打开对应视图 */
+/* 视图引导：本页为「产品详情」单页展示，加载后自动打开对应视图 */
 (function () {
-  var VIEW = "index";
+  var VIEW = "detail";
   function realCode(c) {
     return (window.ICBC_REAL && window.ICBC_REAL[c]) ||
            (window.MULTI_REAL && window.MULTI_REAL[c]) ||
@@ -4157,7 +4157,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   function run() {
     try {
       var tt = document.querySelector(".topbar-title");
-      if (tt) tt.innerHTML = '<span class="plus">+</span> 理财产品概览';
+      if (tt) tt.innerHTML = '<span class="plus">+</span> 产品详情';
       if (VIEW === "manage") { window.openManage(); return; }
       if (VIEW === "add") { Promise.resolve(window.openManage()).then(function () { window.openEdit(null); }); return; }
       if (VIEW === "detail") {
