@@ -4598,5 +4598,266 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 })();
 </script>
 
+
+<script>
+/* ==========================================================================
+ * 跨设备同步 · 通道二：Cloudflare Worker + KV（免登录）
+ *
+ * 启用条件：仅在 *.github.io 下生效（lclist.github.io）。
+ *   在 WorkBuddy 发布域名下本段直接 return，交给「邮箱登录」那一层处理；
+ *   在 file:// / 127.0.0.1 下也不执行（本地 serve.mjs 没有 /api/state 路由）。
+ *
+ * 隔离单位 = 房间名：默认房间 default 是公共的；换一个只有自己知道的房间名即可私有。
+ * 无账号鉴权，知道房间名就能读写 —— 这是免登录换来的代价。
+ *
+ * 冲突策略：整份文档按 updatedAt 后写覆盖；删除类标记(hidden/deleted/deletedCands)与
+ *           自建产品(custom)、字段修补(patches) 按 key 取并集，避免两台设备互相抹掉。
+ * ========================================================================== */
+(function () {
+  "use strict";
+  var BASE     = "https://lclist-finance-api.lclist.workers.dev/api/state";
+  var ROOM_KEY = "observer_sync_room";
+  var META_KEY = "observer_sync_meta";
+  var APPLIED  = "_wb_kv_applied";
+
+  var K = {
+    reg: "observer_reg_v1", favs: "observer_favs", passed: "observer_passed",
+    tocand: "observer_tocand", deletedCands: "observer_deleted_cands",
+    ledger: "observer_ledger", fs: "observer_fs"
+  };
+  var WATCH = Object.keys(K).map(function (k) { return K[k]; });
+
+  var host = location.hostname;
+  if (/(^|\.)workbuddy\.(host|link|cn)$/.test(host)) return;      // 交给邮箱登录层
+  if (location.protocol === "file:") return;
+  if (!/(^|\.)github\.io$/.test(host)) return;
+
+  var rawSet = localStorage.setItem.bind(localStorage);
+  var rawGet = localStorage.getItem.bind(localStorage);
+  var timer = null, busy = false, tipTimer = null, cdTimer = null;
+  var DEVICE = (function () {
+    var m = /(Chrome|Firefox|Edg|Safari)\/[\d.]+/.exec(navigator.userAgent);
+    return (m ? m[1] : "Browser") + " · " + ((navigator.platform || "") + "").slice(0, 12);
+  })();
+
+  function jget(k, d) { try { var v = rawGet(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function meta() { return jget(META_KEY, { updatedAt: "" }); }
+  function setMeta(m) { try { rawSet(META_KEY, JSON.stringify(m)); } catch (e) {} }
+  function room() {
+    var r = "";
+    try { r = (rawGet(ROOM_KEY) || "").trim(); } catch (e) {}
+    return r || "default";
+  }
+  function setRoom(r) {
+    r = String(r || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64) || "default";
+    try { rawSet(ROOM_KEY, r); } catch (e) {}
+    return r;
+  }
+
+  /* ---------- 状态采集 / 落盘 ---------- */
+  function collect() {
+    return {
+      v: 1, updatedAt: new Date().toISOString(), device: DEVICE,
+      reg: jget(K.reg, { custom: [], patches: {}, hidden: [], deleted: [] }),
+      favs: jget(K.favs, []), passed: jget(K.passed, []), tocand: jget(K.tocand, []),
+      deletedCands: jget(K.deletedCands, []), ledger: jget(K.ledger, []),
+      fs: rawGet(K.fs)
+    };
+  }
+  function apply(d) {
+    if (d.reg) rawSet(K.reg, JSON.stringify(d.reg));
+    ["favs", "passed", "tocand", "deletedCands", "ledger"].forEach(function (f) {
+      if (Array.isArray(d[f])) rawSet(K[f], JSON.stringify(d[f]));
+    });
+    if (d.fs != null && d.fs !== "") rawSet(K.fs, String(d.fs));
+  }
+  function strip(d) {
+    return { reg: d.reg, favs: d.favs, passed: d.passed, tocand: d.tocand,
+             deletedCands: d.deletedCands, ledger: d.ledger, fs: d.fs };
+  }
+  function stable(x) {
+    if (x === null || typeof x !== "object") return JSON.stringify(x === undefined ? null : x);
+    if (Array.isArray(x)) return "[" + x.map(stable).join(",") + "]";
+    return "{" + Object.keys(x).sort().map(function (k) { return JSON.stringify(k) + ":" + stable(x[k]); }).join(",") + "}";
+  }
+  function uni(a, b) {
+    var s = [], seen = {};
+    (a || []).concat(b || []).forEach(function (x) { var k = String(x); if (!seen[k]) { seen[k] = 1; s.push(x); } });
+    return s;
+  }
+  function byCode(olderArr, newerArr) {
+    var map = {}, order = [];
+    (olderArr || []).forEach(function (x) { if (x && x.code != null) { if (!(x.code in map)) order.push(x.code); map[x.code] = x; } });
+    (newerArr || []).forEach(function (x) { if (x && x.code != null) { if (!(x.code in map)) order.push(x.code); map[x.code] = x; } });
+    return order.map(function (c) { return map[c]; });
+  }
+  function merge(local, remote) {
+    var remoteNewer = String(remote.updatedAt || "") >= String(local.updatedAt || "");
+    var nw = remoteNewer ? remote : local, od = remoteNewer ? local : remote;
+    var nr = nw.reg || {}, orr = od.reg || {};
+    return {
+      v: 1, updatedAt: new Date().toISOString(), device: DEVICE,
+      reg: {
+        custom: byCode(orr.custom, nr.custom),
+        patches: Object.assign({}, orr.patches || {}, nr.patches || {}),
+        hidden: uni(orr.hidden, nr.hidden),
+        deleted: uni(orr.deleted, nr.deleted)
+      },
+      favs: nw.favs || [], passed: nw.passed || [], tocand: nw.tocand || [],
+      deletedCands: uni(od.deletedCands, nw.deletedCands),
+      ledger: nw.ledger || [],
+      fs: nw.fs != null && nw.fs !== "" ? nw.fs : od.fs
+    };
+  }
+
+  /* ---------- 远端读写 ---------- */
+  function api(r) {
+    return BASE + "?room=" + encodeURIComponent(r);
+  }
+  function remoteGet() {
+    return fetch(api(room()), { method: "GET", headers: { Accept: "application/json" } })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+  }
+  function remotePut(doc) {
+    return fetch(api(room()), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doc: doc, updatedAt: doc.updatedAt, device: DEVICE })
+    }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+  }
+  function schedulePush() {
+    if (busy) return;
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      var d = collect();
+      setState("syncing");
+      remotePut(d).then(function () {
+        setMeta({ updatedAt: d.updatedAt }); setState("synced");
+      }).catch(function (e) { setState("error", e && e.message ? e.message : "网络异常"); });
+    }, 1200);
+  }
+  function sync(reason) {
+    if (busy) return;
+    busy = true; setState("syncing");
+    remoteGet().then(function (res) {
+      var local = collect();
+      if (!res || !res.doc || !res.doc.updatedAt) {
+        return remotePut(local).then(function () { busy = false; setMeta({ updatedAt: local.updatedAt }); setState("synced"); render(); });
+      }
+      var m = merge(local, res.doc);
+      var needApply = stable(strip(m)) !== stable(strip(local));
+      if (needApply) {
+        apply(m);
+        try { sessionStorage.setItem(APPLIED, m.updatedAt); } catch (e) {}
+        return remotePut(m).then(function () {
+          busy = false; setMeta({ updatedAt: m.updatedAt }); setState("pulled");
+          toast("已同步云端最新配置，正在刷新…");
+          setTimeout(function () { location.reload(); }, 700);
+        });
+      }
+      return remotePut(m).then(function () { busy = false; setMeta({ updatedAt: m.updatedAt }); setState("synced"); render(); });
+    }).catch(function (e) {
+      busy = false; setState("error", (e && e.message) || "网络异常");
+    });
+  }
+
+  /* ---------- 捕获本地写入：任何一处改动都会防抖回写云端 ---------- */
+  localStorage.setItem = function (k, v) {
+    rawSet(k, v);
+    if (WATCH.indexOf(k) >= 0) schedulePush();
+  };
+
+  /* ---------- 界面 ---------- */
+  var STATUS = { idle: "未同步", synced: "已同步", syncing: "同步中…", error: "同步失败", pulled: "已拉取" };
+  var cur = { state: "idle", msg: "" };
+  var app = document.createElement("div");
+  app.innerHTML =
+    '<button id="wbKvBtn" type="button">跨设备同步</button>' +
+    '<div id="wbKvMask" class="hidden">' +
+      '<div id="wbKvCard">' +
+        '<div class="kv-h">跨设备同步<button id="wbKvX" type="button">✕</button></div>' +
+        '<div id="wbKvBody"></div>' +
+      '</div>' +
+    '</div>';
+  var st = document.createElement("style");
+  st.textContent =
+    "#wbKvBtn{position:fixed;right:10px;bottom:14px;z-index:9997;font:500 12px/1 -apple-system,PingFang SC,Microsoft YaHei,sans-serif;" +
+      "padding:8px 12px;border:0;border-radius:999px;background:#1f7a5a;color:#fff;box-shadow:0 4px 14px rgba(20,80,60,.35);cursor:pointer}" +
+    "#wbKvBtn.err{background:#e02b2b}#wbKvBtn.busy{background:#6f9c8a}" +
+    "#wbKvMask{position:fixed;inset:0;z-index:9998;background:rgba(20,30,28,.45);display:flex;align-items:center;justify-content:center;padding:16px}" +
+    "#wbKvMask.hidden{display:none}" +
+    "#wbKvCard{width:100%;max-width:340px;background:#fff;border-radius:14px;padding:16px;box-shadow:0 10px 40px rgba(20,40,35,.35);" +
+      "font:400 13px/1.6 -apple-system,PingFang SC,Microsoft YaHei,sans-serif;color:#333}" +
+    "#wbKvCard .kv-h{display:flex;justify-content:space-between;align-items:center;font-weight:500;font-size:15px;margin-bottom:10px}" +
+    "#wbKvCard .kv-h button{border:0;background:transparent;font-size:16px;color:#888;cursor:pointer}" +
+    "#wbKvCard input{width:100%;padding:9px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-top:8px;box-sizing:border-box}" +
+    "#wbKvCard .kv-row{display:flex;gap:8px;margin-top:8px}" +
+    "#wbKvCard .kv-row input{margin-top:0;flex:1}" +
+    "#wbKvCard button.kv-b{flex:0 0 auto;padding:9px 12px;border:0;border-radius:8px;background:#1f7a5a;color:#fff;font-size:13px;cursor:pointer;white-space:nowrap}" +
+    "#wbKvCard button.kv-w{width:100%;margin-top:10px;padding:10px;border:0;border-radius:8px;background:#1f7a5a;color:#fff;font-size:14px;cursor:pointer}" +
+    "#wbKvCard .kv-t{color:#888;font-size:12px;margin-top:8px;word-break:break-all}" +
+    "#wbKvCard .kv-e{color:#e02b2b;font-size:12px;margin-top:6px;min-height:16px}" +
+    "#wbKvCard .kv-ok{color:#0a9c46;font-size:12px;margin-top:6px}";
+  document.head.appendChild(st);
+  document.body.appendChild(app);
+  var btn = app.querySelector("#wbKvBtn"), mask = app.querySelector("#wbKvMask"), body = app.querySelector("#wbKvBody");
+  app.querySelector("#wbKvX").addEventListener("click", function () { mask.classList.add("hidden"); });
+  mask.addEventListener("click", function (e) { if (e.target === mask) mask.classList.add("hidden"); });
+  btn.addEventListener("click", function () { render(); mask.classList.remove("hidden"); });
+
+  function setState(s, msg) {
+    cur.state = s; cur.msg = msg || "";
+    btn.textContent = "跨设备同步 · " + (STATUS[s] || s);
+    btn.className = s === "error" ? "err" : (s === "syncing" ? "busy" : "");
+    btn.title = cur.msg || "";
+  }
+  function toast(msg) {
+    try {
+      var t = document.getElementById("toast");
+      if (!t) return;
+      t.textContent = msg; t.classList.remove("hidden");
+      clearTimeout(tipTimer); tipTimer = setTimeout(function () { t.classList.add("hidden"); }, 2200);
+    } catch (e) {}
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function render() {
+    var m = meta(), r = room();
+    body.innerHTML =
+      '<div class="kv-ok">免登录跨设备同步已开启</div>' +
+      '<div class="kv-t">当前房间：<b>' + esc(r) + '</b><br>设备：' + esc(DEVICE) +
+      '<br>上次同步：' + (m.updatedAt ? m.updatedAt.replace("T", " ").slice(0, 19) : "—") + '</div>' +
+      '<div class="kv-row"><input id="kvRoom" type="text" spellcheck="false" placeholder="房间名（自定义即私有）" value="' + esc(r) + '">' +
+      '<button class="kv-b" id="kvSave">切换</button></div>' +
+      '<button class="kv-w" id="kvNow">立即同步</button>' +
+      '<div class="kv-t">在 Chrome、Firefox、手机、平板上打开同一个网址，填<b>相同房间名</b>，' +
+      '产品目录 / 收藏 / 候选池 / 持仓台账就会自动保持一致。<br>' +
+      '<b>注意：无账号鉴权，知道房间名的人都能读写，请设置一个不容易猜到的房间名。</b></div>';
+    body.querySelector("#kvNow").addEventListener("click", function () { mask.classList.add("hidden"); sync("manual"); });
+    body.querySelector("#kvSave").addEventListener("click", function () {
+      var v = (body.querySelector("#kvRoom").value || "").trim();
+      setRoom(v); render(); sync("room-change");
+    });
+  }
+
+  /* ---------- 启动 ---------- */
+  function start() {
+    render();
+    setState("syncing");
+    sync("boot");
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible" && !busy) sync("visible");
+    });
+    setInterval(function () {
+      if (document.visibilityState === "visible" && !busy) sync("auto");
+    }, 180000);
+  }
+  if (document.readyState === "complete") setTimeout(start, 200);
+  else window.addEventListener("load", function () { setTimeout(start, 200); });
+})();
+</script>
+
 </body>
 </html>
