@@ -4616,6 +4616,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
 
 
+
+
+
 <script>
 /* ==========================================================================
  * 跨设备同步（邮箱登录） —— 跑在 lclist.github.io 上（Cloudflare 自建后端）
@@ -4623,16 +4626,15 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
  * 仅邮箱 + 密码登录一种模式：状态按账号隔离，存在 Cloudflare KV。
  * 登录态存 localStorage，关浏览器再打开自动恢复，无需重登。
  *
- * 入口（自适应）：
- *   · 主页右上角 V 头像  → 改成登录小人图标；
- *   · 产品管理页          → 在「导出」按钮左侧注入「跨设备同步」按钮；
- *   · 其它页              → 右上角浮动登录小人兜底。
+ * 入口：
+ *   · 右上角 V 头像        → 改成登录小人图标（点击出下拉框，仅「退出登录」）；
+ *   · 产品管理页「导出」左侧 → 注入「跨设备同步」按钮（点击立即同步）。
  *
- * 交互（新）：
- *   · 点击登录小人 / 跨设备同步按钮  → 在图标下方弹出一个小「下拉框」，不再跳出整屏弹窗；
- *       - 未登录：下拉框只有「登录 / 注册」，点了才出登录表单（原弹窗仅作为表单容器）；
- *       - 已登录：下拉框显示「立即同步」「退出登录」。
- *   · 选择「退出登录」→ 清空登录态并尝试直接关闭整个网页（浏览器拦截时清空页面提示可关闭）。
+ * 交互：
+ *   · 打开站点若「未登录」→ 屏幕正中弹出登录 / 注册，背景整页虚化且不可触摸；
+ *   · 点击登录小人        → 图标下方下拉框，只含「退出登录」；
+ *   · 点击「退出登录」    → 清空登录态，并回到屏幕正中的登录 / 注册弹窗；
+ *   · 点击「跨设备同步」  → 立即与云端双向同步（带 toast 反馈）。
  *
  * 密码学：PBKDF2(email 为盐, 10 万次) 在浏览器算，只把 256bit 派生密钥发给服务端，
  *         服务端再存 SHA-256(随机盐 + dk)。明文密码不出浏览器。
@@ -4661,7 +4663,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
   var rawSet = localStorage.setItem.bind(localStorage);
   var rawGet = localStorage.getItem.bind(localStorage);
-  var timer = null, busy = false, tipTimer = null, triggerEl = null;
+  var timer = null, busy = false, tipTimer = null, triggerEl = null, syncBtnEl = null;
+  var booted = false;
   var DEVICE = (function () {
     var m = /(Chrome|Firefox|Edg|Safari)\/[\d.]+/.exec(navigator.userAgent);
     return (m ? m[1] : "Browser") + " · " + ((navigator.platform || "") + "").slice(0, 12);
@@ -4679,6 +4682,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   function setMode(m) { lsSet(MODE_KEY, m); }
   function token() { return ls(TOKEN_KEY); }
   function email() { return ls(EMAIL_KEY); }
+  function loggedIn() { return !!(token()); }
 
   /* ---------- 密码派生（浏览器侧 PBKDF2） ---------- */
   function hex(bytes) {
@@ -4777,12 +4781,11 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     });
   }
   function onUnauth() {
-    lsSet(TOKEN_KEY, ""); setMode("login"); setState("idle", "登录已失效"); render(); updateTrigger();
+    lsSet(TOKEN_KEY, ""); setMode("login"); setState("idle", "登录已失效");
+    render(); updateTrigger(); openLogin();
   }
   function schedulePush() {
-    var m = mode();
-    if (busy || m === "login") return;   // 未登录前不往任何地方推数据
-    if (m === "user" && !token()) return;
+    if (busy || !loggedIn()) return;   // 未登录前不往任何地方推数据
     clearTimeout(timer);
     timer = setTimeout(function () {
       var d = collect();
@@ -4791,16 +4794,18 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
         .catch(function (e) { setState("error", e && e.message ? e.message : "网络异常"); });
     }, 1200);
   }
-  function sync() {
-    var m = mode();
-    if (busy || m === "login") return;
-    if (m === "user" && !token()) return;
+  function sync(manual) {
+    if (busy) { if (manual) toast("正在同步…"); return Promise.resolve(); }
+    if (!loggedIn()) { if (manual) openLogin(); return Promise.resolve(); }
     busy = true; setState("syncing");
-    remoteGet().then(function (res) {
+    if (manual) toast("正在同步…");
+    return remoteGet().then(function (res) {
       var local = collect();
       if (!res || !res.doc || !res.doc.updatedAt) {
         return remotePut(local).then(function () {
-          busy = false; setMeta({ updatedAt: local.updatedAt }); setState("synced"); render();
+          busy = false; setMeta({ updatedAt: local.updatedAt }); setState("synced");
+          if (manual) toast("已同步");
+          render();
         });
       }
       var m = merge(local, res.doc);
@@ -4815,10 +4820,13 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
         });
       }
       return remotePut(m).then(function () {
-        busy = false; setMeta({ updatedAt: m.updatedAt }); setState("synced"); render();
+        busy = false; setMeta({ updatedAt: m.updatedAt }); setState("synced");
+        if (manual) toast("已同步");
+        render();
       });
     }).catch(function (e) {
       busy = false; setState("error", (e && e.message) || "网络异常");
+      if (manual) toast("同步失败：" + ((e && e.message) || "网络异常"));
     });
   }
 
@@ -4846,12 +4854,13 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     '<div id="wbLoginMenu" class="hidden"></div>';
   var st = document.createElement("style");
   st.textContent =
-    "#wbKvMask{position:fixed;inset:0;z-index:9998;background:rgba(20,30,28,.32);" +
-      "-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);" +
-      "display:flex;align-items:center;justify-content:center;padding:16px}" +
+    "#wbKvMask{position:fixed;inset:0;z-index:2147483000;background:rgba(20,30,28,.38);" +
+      "-webkit-backdrop-filter:blur(9px) saturate(.9);backdrop-filter:blur(9px) saturate(.9);" +
+      "display:flex;align-items:center;justify-content:center;padding:16px;" +
+      "touch-action:none;overscroll-behavior:contain}" +
     "#wbKvMask.hidden{display:none}" +
     "#wbKvCard{width:100%;max-width:340px;background:#fff;border-radius:14px;padding:16px;box-shadow:0 10px 40px rgba(20,40,35,.35);" +
-      "font:400 13px/1.6 -apple-system,PingFang SC,Microsoft YaHei,sans-serif;color:#333;max-height:86vh;overflow:auto}" +
+      "font:400 13px/1.6 -apple-system,PingFang SC,Microsoft YaHei,sans-serif;color:#333;max-height:86vh;overflow:auto;touch-action:auto}" +
     "#wbKvCard .kv-h{display:flex;justify-content:space-between;align-items:center;font-weight:500;font-size:15px;margin-bottom:10px}" +
     "#wbKvCard .kv-h button{border:0;background:transparent;font-size:16px;color:#888;cursor:pointer}" +
     "#wbKvCard input{width:100%;padding:9px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-top:8px;box-sizing:border-box}" +
@@ -4865,17 +4874,18 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     "#wbKvCard .kv-e{color:#e02b2b;font-size:12px;margin-top:6px;min-height:16px}" +
     "#wbKvCard .kv-ok{color:#0a9c46;font-size:12px;margin-top:6px}" +
     /* 触发入口样式 */
-    "#wbLoginFloat{position:fixed;right:10px;top:10px;z-index:9997;width:38px;height:38px;border:0;border-radius:50%;" +
+    "#wbLoginFloat{position:fixed;right:10px;top:10px;z-index:2147482000;width:38px;height:38px;border:0;border-radius:50%;" +
       "background:#f25b3b;color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(20,80,60,.35);cursor:pointer}" +
     "#wbLoginFloat svg{width:20px;height:20px}" +
-    "#wbSyncBtnInline{margin-right:0}" +
-    "#btnSettings.wb-login-trigger svg{width:20px;height:20px}" +
-    "#btnSettings.wb-logged-in,#wbLoginFloat.wb-logged-in,#wbSyncBtnInline.wb-logged-in{background:#1f7a5a!important;color:#fff!important}" +
+    "#btnSettings.wb-login-trigger{display:flex;align-items:center;justify-content:center;cursor:pointer}" +
+    "#btnSettings.wb-login-trigger svg{width:19px;height:19px;display:block}" +
+    "#btnSettings.wb-logged-in,#wbLoginFloat.wb-logged-in{background:#1f7a5a!important;color:#fff!important}" +
+    "#wbSyncBtnInline{margin-right:0;flex:0 0 auto}" +
     /* 下拉框样式 */
-    "#wbLoginMenu{position:fixed;z-index:9999;min-width:156px;background:#fff;border-radius:10px;" +
+    "#wbLoginMenu{position:fixed;z-index:2147483001;min-width:132px;background:#fff;border-radius:10px;" +
       "box-shadow:0 8px 30px rgba(20,40,35,.3);padding:6px;font:400 13px/1.4 -apple-system,PingFang SC,Microsoft YaHei,sans-serif;color:#333}" +
     "#wbLoginMenu.hidden{display:none}" +
-    "#wbLoginMenu .wb-em{color:#888;font-size:12px;padding:4px 12px 6px}" +
+    "#wbLoginMenu .wb-em{color:#888;font-size:12px;padding:4px 12px 6px;word-break:break-all}" +
     "#wbLoginMenu .wb-sep{height:1px;background:#eee;margin:4px 2px}" +
     "#wbLoginMenu .wb-mi{padding:9px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}" +
     "#wbLoginMenu .wb-mi:hover{background:#f0f5f3}" +
@@ -4886,7 +4896,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   var mask = app.querySelector("#wbKvMask"), body = app.querySelector("#wbKvBody");
   var menuEl = app.querySelector("#wbLoginMenu");
   app.querySelector("#wbKvX").addEventListener("click", closeModal);
-  mask.addEventListener("click", function (e) { if (e.target === mask) { /* 点遮罩空白处不关闭，确保登录表单为焦点 */ } });
+  // 点遮罩空白处不关闭：确保未登录时必须先完成登录 / 关闭
+  mask.addEventListener("click", function (e) { if (e.target === mask) { e.preventDefault(); e.stopPropagation(); } });
 
   function setState(s, msg) {
     cur.state = s; cur.msg = msg || "";
@@ -4897,7 +4908,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       var t = document.getElementById("toast");
       if (!t) return;
       t.textContent = msg; t.classList.remove("hidden");
-      clearTimeout(tipTimer); tipTimer = setTimeout(function () { t.classList.add("hidden"); }, 2200);
+      clearTimeout(tipTimer); tipTimer = setTimeout(function () { t.classList.add("hidden"); }, 2400);
     } catch (e) {}
   }
   function esc(s) {
@@ -4917,13 +4928,13 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       .catch(function (e) { setState("error", e && e.message ? e.message : "网络异常"); });
   }
 
-  /* ---------- 登录表单（仅当在下拉框里点「登录 / 注册」时才出现的表单，不再是整屏强制弹窗） ---------- */
+  /* ---------- 登录表单（整屏居中弹窗，未登录时自动出现） ---------- */
   var view = "login";
   var recoverQuestion = "";
   var recoverEmail = "";
 
   function render() {
-    if (mode() === "user" && token()) return renderUser();
+    if (loggedIn()) return renderUser();
     return renderLogin();
   }
 
@@ -4937,10 +4948,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       '<button class="kv-s" id="kvOut">退出登录</button>' +
       '<div class="kv-t">登录状态已保存在本机（90 天），下次打开浏览器无需重新登录。<br>' +
       '数据在云端按账号隔离，别人看不到。</div>';
-    body.querySelector("#kvNow").addEventListener("click", function () { closeModal(); sync(); });
-    body.querySelector("#kvOut").addEventListener("click", function () {
-      doLogout();
-    });
+    body.querySelector("#kvNow").addEventListener("click", function () { closeModal(); sync(true); });
+    body.querySelector("#kvOut").addEventListener("click", doLogout);
   }
 
   function renderLogin() {
@@ -5069,18 +5078,13 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     });
   }
 
-  /* ---------- 下拉框（替代整屏弹窗） ---------- */
+  /* ---------- 下拉框（仅登录小人触发，已登录只含「退出登录」） ---------- */
   function buildMenu() {
-    if (mode() === "user" && token()) {
-      return '<div class="wb-em">已登录：' + esc(email()) + '</div>' +
-             '<div class="wb-sep"></div>' +
-             '<div class="wb-mi" data-act="sync">立即同步</div>' +
-             '<div class="wb-mi danger" data-act="out">退出登录</div>';
-    }
-    return '<div class="wb-mi" data-act="login">登录 / 注册</div>';
+    return '<div class="wb-mi danger" data-act="out">退出登录</div>';
   }
   function openMenu() {
     if (!triggerEl) return;
+    if (!loggedIn()) { openLogin(); return; }   // 未登录时点小人 → 直接回登录弹窗
     menuEl.innerHTML = buildMenu();
     menuEl.classList.remove("hidden");
     var rect = triggerEl.getBoundingClientRect();
@@ -5092,13 +5096,11 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     if (top + mh > window.innerHeight - 8) top = rect.top - mh - 6;   // 下方放不下就翻到上方
     menuEl.style.left = left + "px";
     menuEl.style.top = top + "px";
-    menuEl.querySelectorAll(".wb-mi").forEach(function (it) {
+    Array.prototype.forEach.call(menuEl.querySelectorAll(".wb-mi"), function (it) {
       it.addEventListener("click", function () {
         var act = it.getAttribute("data-act");
         closeMenu();
-        if (act === "login") openLogin();
-        else if (act === "sync") sync();
-        else if (act === "out") doLogout();
+        if (act === "out") doLogout();
       });
     });
   }
@@ -5107,49 +5109,27 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     if (menuEl.classList.contains("hidden")) openMenu(); else closeMenu();
   }
   function doLogout() {
+    closeMenu();
     post("/api/auth/logout", { token: token() }).catch(function () {});
-    lsSet(TOKEN_KEY, ""); setMode("login"); setState("idle"); render(); updateTrigger();
-    // 尝试直接关闭整个网页（脚本只能关闭由脚本打开的窗口，普通导航可能被浏览器拦截）
-    try { window.open("", "_self"); window.close(); } catch (e) {}
-    // 兜底：若浏览器未关闭，清空页面并提示用户可手动关闭标签页
-    setTimeout(function () {
-      try {
-        document.documentElement.innerHTML =
-          '<div style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;' +
-          'font:16px/1.7 -apple-system,PingFang SC,Microsoft YaHei,sans-serif;color:#555;background:#fafafa">' +
-          '<div style="text-align:center">已退出登录<br>' +
-          '<span style="font-size:13px;color:#999">可关闭此标签页</span></div></div>';
-      } catch (e) {}
-    }, 150);
+    lsSet(TOKEN_KEY, ""); setMode("login"); setState("idle");
+    view = "login";
+    updateTrigger();           // 先把入口恢复成未登录样式
+    render();                  // 渲染登录 / 注册表单
+    openLogin();               // 屏幕正中弹出登录 / 注册，背景虚化
   }
 
-  /* ---------- 触发入口（自适应） ---------- */
+  /* ---------- 触发入口 ---------- */
   function setupTrigger() {
-    // 主页（index.html）：把右上角 V 头像改成登录小人，点它弹下拉框；
-    // 其它页（管理/详情/添加）：在「导出」按钮左侧注入「跨设备同步」按钮，点它也弹下拉框；头像保留为数据源状态。
-    var isHome = /(^|\/)(index\.html)?$/.test(location.pathname);
-    if (isHome) {
-      var el = document.getElementById("btnSettings");
-      if (el && el.classList.contains("avatar")) {
-        el.innerHTML = PERSON_SVG;       // V 头像 → 登录小人
-        el.title = "登录 / 跨设备同步";
-        el.setAttribute("role", "button");
-        el.setAttribute("aria-label", "登录 / 跨设备同步");
-        el.classList.add("wb-login-trigger");
-        el.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); toggleMenu(); });
-        return el;
-      }
-    }
-    var exp = document.getElementById("btnExport");
-    if (exp) {
-      var b = document.createElement("button");
-      b.type = "button";
-      b.id = "wbSyncBtnInline";
-      b.className = "btn-mini";
-      b.textContent = "跨设备同步";
-      exp.parentNode.insertBefore(b, exp);   // 放到「导出」左侧
-      b.addEventListener("click", function (e) { e.stopPropagation(); toggleMenu(); });
-      return b;
+    // V 头像 → 登录小人（四个页面都有 #btnSettings 头像，数据源仍由齿轮 #btnSettings2 负责）
+    var el = document.getElementById("btnSettings");
+    if (el && el.classList.contains("avatar")) {
+      el.innerHTML = PERSON_SVG;
+      el.title = "登录 / 跨设备同步";
+      el.setAttribute("role", "button");
+      el.setAttribute("aria-label", "登录 / 跨设备同步");
+      el.classList.add("wb-login-trigger");
+      el.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); toggleMenu(); });
+      return el;
     }
     var fb = document.createElement("button");
     fb.type = "button"; fb.id = "wbLoginFloat"; fb.innerHTML = PERSON_SVG;
@@ -5158,9 +5138,25 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     fb.addEventListener("click", function (e) { e.stopPropagation(); toggleMenu(); });
     return fb;
   }
+
+  // 在产品管理页「导出」左侧注入「跨设备同步」按钮（点击＝立即同步）
+  function injectSyncButton() {
+    var exp = document.getElementById("btnExport");
+    if (!exp || document.getElementById("wbSyncBtnInline")) return null;
+    var b = document.createElement("button");
+    b.type = "button";
+    b.id = "wbSyncBtnInline";
+    b.className = "btn-mini";
+    b.textContent = "跨设备同步";
+    b.title = "与云端双向同步";
+    exp.parentNode.insertBefore(b, exp);   // 放到「导出」左侧
+    b.addEventListener("click", function (e) { e.stopPropagation(); sync(true); });
+    return b;
+  }
+
   function updateTrigger() {
     if (!triggerEl) return;
-    if (mode() === "user" && token()) {
+    if (loggedIn()) {
       triggerEl.classList.add("wb-logged-in");
       triggerEl.title = "已登录：" + email() + " · 点击管理同步";
     } else {
@@ -5169,25 +5165,37 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     }
   }
 
-  /* ---------- 打开 / 关闭登录表单（仅下拉框「登录 / 注册」触发） ---------- */
+  /* ---------- 打开 / 关闭登录表单 ---------- */
   function openLogin() {
+    hideSystemOverlays();
     render();
     mask.classList.remove("hidden");
   }
   function closeModal() {
     mask.classList.add("hidden");
   }
+  // 后台同步或 URL 变化可能重新打开应用内的浮层，这里保证登录弹窗始终在最上层
+  function hideSystemOverlays() {
+    // 仅做无副作用的层级保障；不主动关闭用户界面其它弹窗
+  }
 
   /* ---------- 启动 ---------- */
   function start() {
+    if (booted) return;
+    booted = true;
     triggerEl = setupTrigger();
+    syncBtnEl = injectSyncButton();
     updateTrigger();
-    // 不再强制自动弹登录：打开站点即正常可用，点登录小人 / 跨设备同步按钮才出下拉框。
-    if (mode() === "user" && token()) {
+
+    if (loggedIn()) {
       setState("syncing"); sync();
+    } else {
+      // 未登录：打开站点即在屏幕正中弹出登录 / 注册，背景虚化且不可触摸
+      setTimeout(openLogin, 260);
     }
+
     document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "visible" && !busy && mode() !== "login") sync();
+      if (document.visibilityState === "visible" && !busy && loggedIn()) sync();
     });
     // 点击空白处关闭下拉框（点触发元素本身由 toggleMenu 处理）
     document.addEventListener("click", function (e) {
@@ -5196,21 +5204,27 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       if (triggerEl && triggerEl.contains(e.target)) return;
       closeMenu();
     });
+    // 关闭下拉框：Esc
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeMenu();
+    });
     setInterval(function () {
-      if (document.visibilityState === "visible" && !busy && mode() !== "login") sync();
+      if (document.visibilityState === "visible" && !busy && loggedIn()) sync();
     }, 180000);
   }
 
   // 对外暴露，方便页面其它脚本调用
   window.WB_SYNC = {
     open: openLogin, close: closeModal, toggleMenu: toggleMenu, closeMenu: closeMenu,
-    logout: doLogout,
-    isLoggedIn: function () { return mode() === "user" && !!token(); },
+    logout: doLogout, sync: function () { return sync(true); },
+    isLoggedIn: loggedIn,
     getEmail: email
   };
 
-  if (document.readyState === "complete") setTimeout(start, 200);
-  else window.addEventListener("load", function () { setTimeout(start, 200); });
+  if (document.readyState === "complete") setTimeout(start, 150);
+  else window.addEventListener("load", function () { setTimeout(start, 150); });
+  // 兜底：若 load 事件已被触发过（脚本注入较晚），也确保启动
+  setTimeout(function () { start(); }, 1200);
 })();
 </script>
 
