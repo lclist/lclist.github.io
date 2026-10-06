@@ -4653,7 +4653,13 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   function mode() {
     var m = ls(MODE_KEY);
     if (m === "user" || m === "room" || m === "off") return m;
-    return ls(TOKEN_KEY) ? "user" : "room";
+    if (ls(TOKEN_KEY)) return "user";
+    // 从未明确选过：老用户（已设过自己的房间名，非 public 的 default）保持房间模式不打断；
+    // 其余一律先进登录/注册面板。原先默认 room=default 会让新用户一打开就把本机数据
+    // 推进公共房间（谁都能读），这是要避免的。
+    var r = (ls(ROOM_KEY) || "").trim();
+    if (r && r !== "default") return "room";
+    return "login";
   }
   function setMode(m) { lsSet(MODE_KEY, m); }
   function room() {
@@ -4770,8 +4776,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     lsSet(TOKEN_KEY, ""); setMode("off"); setState("idle", "登录已失效"); render();
   }
   function schedulePush() {
-    if (busy || mode() === "off") return;
-    if (mode() === "user" && !token()) return;
+    var m = mode();
+    if (busy || m === "off" || m === "login") return;   // 未选择模式前不往任何地方推数据
+    if (m === "user" && !token()) return;
     clearTimeout(timer);
     timer = setTimeout(function () {
       var d = collect();
@@ -4781,8 +4788,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     }, 1200);
   }
   function sync() {
-    if (busy || mode() === "off") return;
-    if (mode() === "user" && !token()) return;
+    var m = mode();
+    if (busy || m === "off" || m === "login") return;
+    if (m === "user" && !token()) return;
     busy = true; setState("syncing");
     remoteGet().then(function (res) {
       var local = collect();
@@ -4857,7 +4865,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
   function setState(s, msg) {
     cur.state = s; cur.msg = msg || "";
-    btn.textContent = "跨设备同步 · " + (STATUS[s] || s);
+    btn.textContent = "跨设备同步 · " + (s === "idle" && mode() === "login" ? "点此开启" : (STATUS[s] || s));
     btn.className = s === "error" ? "err" : (s === "syncing" ? "busy" : (mode() === "off" ? "off" : ""));
     btn.title = cur.msg || "";
   }
@@ -4925,7 +4933,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       '<div class="kv-row"><input id="kvRoom" type="text" spellcheck="false" placeholder="房间名" value="' + esc(room()) + '">' +
       '<button class="kv-b" id="kvSave">切换</button></div>' +
       '<button class="kv-w" id="kvNow">立即同步</button>' +
-      '<button class="kv-s" id="kvGoLogin">改用邮箱账号登录（数据按账号隔离）</button>' +
+      '<button class="kv-w" id="kvGoLogin">用邮箱登录 / 注册（推荐，数据按账号隔离）</button>' +
       '<div class="kv-t"><b>无鉴权：知道房间名的人都能读写，default 是公共房间。</b></div>';
     body.querySelector("#kvNow").addEventListener("click", function () { mask.classList.add("hidden"); sync(); });
     body.querySelector("#kvSave").addEventListener("click", function () {
@@ -5065,9 +5073,10 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
   /* ---------- 启动 ---------- */
   function start() {
+    var m0 = mode();
     render();
-    if (mode() !== "off") { setState("syncing"); sync(); }
-    else setState("idle");
+    if (m0 === "off" || m0 === "login") setState("idle");
+    else { setState("syncing"); sync(); }
     document.addEventListener("visibilitychange", function () {
       if (document.visibilityState === "visible" && !busy && mode() !== "off") sync();
     });
