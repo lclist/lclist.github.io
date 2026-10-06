@@ -3735,6 +3735,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     data.passed = state.passed.slice();
     data.deletedCands = state.deletedCands.slice();
     data.toCand = state.toCand.slice();
+    // 台账与字号此前漏在备份之外，跨设备搬运会丢，这里补上
+    try { data.ledger = JSON.parse(localStorage.getItem("observer_ledger") || "[]"); } catch (e) {}
+    data.fs = localStorage.getItem("observer_fs");
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -3764,8 +3767,12 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
         localStorage.setItem("observer_passed", JSON.stringify(state.passed));
         localStorage.setItem("observer_deleted_cands", JSON.stringify(state.deletedCands));
         localStorage.setItem("observer_tocand", JSON.stringify(state.toCand));
+        if (Array.isArray(data.ledger)) localStorage.setItem("observer_ledger", JSON.stringify(data.ledger));
+        if (data.fs != null && data.fs !== "") localStorage.setItem("observer_fs", String(data.fs));
       } catch (e) {}
       afterManage(d);
+      // 台账/字号已写入本地存储，刷新一次让台账界面读到新数据
+      if (Array.isArray(data.ledger) || (data.fs != null && data.fs !== "")) setTimeout(() => location.reload(), 700);
     };
     fr.readAsText(file);
     this.value = "";
@@ -4177,5 +4184,419 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   else window.addEventListener("load", function () { setTimeout(run, 80); });
 })();
 </script>
+
+<script>
+/* ==========================================================================
+ * 云端同步（WorkBuddy 云服务）—— 跨设备共享产品目录 / 收藏 / 候选池 / 台账
+ *
+ * 启用条件：仅在本应用的正式域名下生效（*.workbuddy.host / .link / .cn）。
+ * 在 lclist.github.io 或 file:// 等其它环境打开时本段整体不执行，
+ * 行为与改造前完全一致（纯本地 localStorage），不影响任何现有功能。
+ *
+ * 登录方式：邮箱 + 密码（首次用邮箱验证码注册并设密码）。登录态由 SDK 持久化在
+ *           localStorage，关闭浏览器再打开自动恢复，无需重新登录。
+ * 数据模型：云端一张表 fund_app_state，每个登录用户一行，doc(JSONB) 存整份状态。
+ * 冲突策略：整份文档按 updatedAt 后写覆盖；删除类标记(hidden/deleted/deletedCands)与
+ *           自建产品(custom)、字段修补(patches) 按 key 取并集，避免两台设备互相抹掉。
+ * ========================================================================== */
+(function () {
+  "use strict";
+  var ENDPOINT = "https://wealth-fund-focus.app.workbuddy.host";
+  var PUB_KEY  = "wbpk_vKZW1Wh2PG0mCJKBLxEjil_xoukXU3KTwQFm4yk0hL9sRFAjjRszChb";
+  var TABLE    = "fund_app_state";
+  var META_KEY = "observer_sync_meta";
+  var EMAIL_KEY = "observer_sync_email";
+  var APPLIED  = "_wb_sync_applied";
+
+  var K = {
+    reg: "observer_reg_v1", favs: "observer_favs", passed: "observer_passed",
+    tocand: "observer_tocand", deletedCands: "observer_deleted_cands",
+    ledger: "observer_ledger", fs: "observer_fs"
+  };
+  var WATCH = Object.keys(K).map(function (k) { return K[k]; });
+
+  if (!/(^|\.)workbuddy\.(host|link|cn)$/.test(location.hostname)) return;
+
+  var rawSet = localStorage.setItem.bind(localStorage);
+  var rawGet = localStorage.getItem.bind(localStorage);
+  var cloud = null, timer = null, busy = false, timerTip = null;
+  var sess = null, send = null, countdown = 0, cdTimer = null;
+  var DEVICE = (function () {
+    var m = /(Chrome|Firefox|Edg|Safari)\/[\d.]+/.exec(navigator.userAgent);
+    return (m ? m[1] : "Browser") + " · " + ((navigator.platform || "") + "").slice(0, 12);
+  })();
+
+  function jget(k, d) { try { var v = rawGet(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function meta() { return jget(META_KEY, { updatedAt: "", uid: "" }); }
+  function setMeta(m) { try { rawSet(META_KEY, JSON.stringify(m)); } catch (e) {} }
+
+  /* ---------- 状态采集 / 落盘 ---------- */
+  function collect() {
+    return {
+      v: 1, updatedAt: new Date().toISOString(), device: DEVICE,
+      reg: jget(K.reg, { custom: [], patches: {}, hidden: [], deleted: [] }),
+      favs: jget(K.favs, []), passed: jget(K.passed, []), tocand: jget(K.tocand, []),
+      deletedCands: jget(K.deletedCands, []), ledger: jget(K.ledger, []),
+      fs: rawGet(K.fs)
+    };
+  }
+  function apply(d) {
+    if (d.reg) rawSet(K.reg, JSON.stringify(d.reg));
+    ["favs", "passed", "tocand", "deletedCands", "ledger"].forEach(function (f) {
+      if (Array.isArray(d[f])) rawSet(K[f], JSON.stringify(d[f]));
+    });
+    if (d.fs != null && d.fs !== "") rawSet(K.fs, String(d.fs));
+  }
+  function strip(d) {
+    return { reg: d.reg, favs: d.favs, passed: d.passed, tocand: d.tocand,
+             deletedCands: d.deletedCands, ledger: d.ledger, fs: d.fs };
+  }
+  function stable(x) {
+    if (x === null || typeof x !== "object") return JSON.stringify(x === undefined ? null : x);
+    if (Array.isArray(x)) return "[" + x.map(stable).join(",") + "]";
+    return "{" + Object.keys(x).sort().map(function (k) { return JSON.stringify(k) + ":" + stable(x[k]); }).join(",") + "}";
+  }
+  function uni(a, b) {
+    var s = [], seen = {};
+    (a || []).concat(b || []).forEach(function (x) { var k = String(x); if (!seen[k]) { seen[k] = 1; s.push(x); } });
+    return s;
+  }
+  function byCode(olderArr, newerArr) {
+    var map = {}, order = [];
+    (olderArr || []).forEach(function (x) { if (x && x.code != null) { if (!(x.code in map)) order.push(x.code); map[x.code] = x; } });
+    (newerArr || []).forEach(function (x) { if (x && x.code != null) { if (!(x.code in map)) order.push(x.code); map[x.code] = x; } });
+    return order.map(function (c) { return map[c]; });
+  }
+  function merge(local, remote) {
+    var remoteNewer = String(remote.updatedAt || "") >= String(local.updatedAt || "");
+    var nw = remoteNewer ? remote : local, od = remoteNewer ? local : remote;
+    var nr = nw.reg || {}, orr = od.reg || {};
+    var out = {
+      v: 1, updatedAt: new Date().toISOString(), device: DEVICE,
+      reg: {
+        custom: byCode(orr.custom, nr.custom),
+        patches: Object.assign({}, orr.patches || {}, nr.patches || {}),
+        hidden: uni(orr.hidden, nr.hidden),
+        deleted: uni(orr.deleted, nr.deleted)
+      },
+      favs: nw.favs || [], passed: nw.passed || [], tocand: nw.tocand || [],
+      deletedCands: uni(od.deletedCands, nw.deletedCands),
+      ledger: nw.ledger || [],
+      fs: nw.fs != null && nw.fs !== "" ? nw.fs : od.fs
+    };
+    return out;
+  }
+
+  /* ---------- 远端读写 ---------- */
+  function push(doc, silent) {
+    return cloud.database.from(TABLE)
+      .upsert({ doc: doc, updated_at: doc.updatedAt, device: DEVICE }, { onConflict: "owner_id" })
+      .select()
+      .then(function (r) {
+        if (r.error) { setState("error", r.error.message || "写入云端失败"); return false; }
+        setMeta({ updatedAt: doc.updatedAt, uid: sessUid() });
+        if (!silent) setState("synced");
+        return true;
+      })
+      .catch(function (e) { setState("error", e && e.message ? e.message : "网络异常"); return false; });
+  }
+  function schedulePush() {
+    if (!sess || busy) return;
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      setState("syncing");
+      push(collect(), true).then(function (ok) { if (ok) setState("synced"); });
+    }, 1200);
+  }
+  function sessUid() {
+    try { return (sess && (sess.user ? (sess.user.id || sess.user.uid) : null)) || ""; } catch (e) { return ""; }
+  }
+  /* 会话恢复：先取本地已持久化的 session，失效时用 refresh_token 换发一次。
+     SDK 把 session 存在 localStorage，所以关掉浏览器再打开依然在登录态。 */
+  function ensureSession() {
+    return cloud.auth.getSession().then(function (s) {
+      if (!s.error && s.data) return s.data;
+      return cloud.auth.refreshSession().then(function (r) {
+        return (r && !r.error && r.data) ? r.data : null;
+      }).catch(function () { return null; });
+    }).catch(function () { return null; });
+  }
+  function emailOf(s) {
+    try {
+      var u = (s && s.user) || s || {};
+      if (u.email) return u.email;
+      var md = u.user_metadata || u.userMetadata || {};
+      return md.email || u.username || "";
+    } catch (e) { return ""; }
+  }
+  function lastEmail() { try { return rawGet(EMAIL_KEY) || ""; } catch (e) { return ""; } }
+  function rememberEmail(v) { try { if (v) rawSet(EMAIL_KEY, v); } catch (e) {} }
+  function pull(reason) {
+    if (!cloud || busy) return Promise.resolve();
+    busy = true; setState("syncing");
+    return ensureSession().then(function (s) {
+      if (!s) { sess = null; busy = false; setState("out"); render(); return; }
+      sess = s;
+      rememberEmail(emailOf(s));
+      return cloud.database.from(TABLE).select("doc,rev").maybeSingle().then(function (r) {
+        if (r.error) { busy = false; setState("error", r.error.message); return; }
+        var local = collect();
+        if (!r.data) { return push(local).then(function () { busy = false; render(); }); }
+        var remote = r.data.doc || {};
+        if (!remote.updatedAt) { return push(local).then(function () { busy = false; render(); }); }
+        var m = merge(local, remote);
+        var needApply = stable(strip(m)) !== stable(strip(local));
+        setMeta({ updatedAt: m.updatedAt, uid: sessUid() });
+        if (needApply) {
+          apply(m);
+          try { sessionStorage.setItem(APPLIED, m.updatedAt); } catch (e) {}
+          busy = false; setState("pulled");
+          toast("已拉取云端最新配置，正在刷新…");
+          setTimeout(function () { location.reload(); }, 700);
+          return;
+        }
+        return push(m, true).then(function () { busy = false; setState("synced"); render(); });
+      });
+    }).catch(function (e) {
+      busy = false; setState("error", e && e.message ? e.message : "网络异常");
+    });
+  }
+
+  /* ---------- 捕获本地写入：任何一处改动都会防抖回写云端 ---------- */
+  localStorage.setItem = function (k, v) {
+    rawSet(k, v);
+    if (WATCH.indexOf(k) >= 0) schedulePush();
+  };
+
+  /* ---------- 界面 ---------- */
+  var STATUS = { out: "未登录", synced: "已同步", syncing: "同步中…", error: "同步失败", pulled: "已拉取" };
+  var cur = { state: "out", msg: "" };
+  var app = document.createElement("div");
+  app.innerHTML =
+    '<button id="wbSyncBtn" type="button">云同步</button>' +
+    '<div id="wbSyncMask" class="hidden">' +
+      '<div id="wbSyncCard">' +
+        '<div class="wb-h">云端同步<button id="wbSyncX" type="button">✕</button></div>' +
+        '<div id="wbSyncBody"></div>' +
+      '</div>' +
+    '</div>';
+  var el = document.createElement("style");
+  el.textContent =
+    "#wbSyncBtn{position:fixed;right:10px;bottom:14px;z-index:9998;font:500 12px/1 -apple-system,PingFang SC,Microsoft YaHei,sans-serif;" +
+      "padding:8px 12px;border:0;border-radius:999px;background:#6a5fd0;color:#fff;box-shadow:0 4px 14px rgba(60,50,140,.35);cursor:pointer}" +
+    "#wbSyncBtn.err{background:#e02b2b}#wbSyncBtn.busy{background:#8a86c0}" +
+    "#wbSyncMask{position:fixed;inset:0;z-index:9999;background:rgba(30,26,60,.45);display:flex;align-items:center;justify-content:center;padding:16px}" +
+    "#wbSyncMask.hidden{display:none}" +
+    "#wbSyncCard{width:100%;max-width:340px;background:#fff;border-radius:14px;padding:16px;box-shadow:0 10px 40px rgba(30,20,70,.35);" +
+      "font:400 13px/1.6 -apple-system,PingFang SC,Microsoft YaHei,sans-serif;color:#333}" +
+    "#wbSyncCard .wb-h{display:flex;justify-content:space-between;align-items:center;font-weight:500;font-size:15px;margin-bottom:10px}" +
+    "#wbSyncCard .wb-h button{border:0;background:transparent;font-size:16px;color:#888;cursor:pointer}" +
+    "#wbSyncCard input{width:100%;padding:9px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-top:8px;box-sizing:border-box}" +
+    "#wbSyncCard .wb-row{display:flex;gap:8px;margin-top:8px}" +
+    "#wbSyncCard .wb-row input{margin-top:0;flex:1}" +
+    "#wbSyncCard button.wb-b{flex:0 0 auto;padding:9px 12px;border:0;border-radius:8px;background:#6a5fd0;color:#fff;font-size:13px;cursor:pointer;white-space:nowrap}" +
+    "#wbSyncCard button.wb-b:disabled{background:#b9b5dd;cursor:default}" +
+    "#wbSyncCard button.wb-w{width:100%;margin-top:10px;padding:10px;border:0;border-radius:8px;background:#6a5fd0;color:#fff;font-size:14px;cursor:pointer}" +
+    "#wbSyncCard button.wb-s{width:100%;margin-top:8px;padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#555;font-size:13px;cursor:pointer}" +
+    "#wbSyncCard .wb-t{color:#888;font-size:12px;margin-top:8px;word-break:break-all}" +
+    "#wbSyncCard .wb-e{color:#e02b2b;font-size:12px;margin-top:6px;min-height:16px}" +
+    "#wbSyncCard .wb-ok{color:#0a9c46;font-size:12px;margin-top:6px}";
+  document.head.appendChild(el);
+  document.body.appendChild(app);
+  var btn = app.querySelector("#wbSyncBtn"), mask = app.querySelector("#wbSyncMask"), body = app.querySelector("#wbSyncBody");
+  app.querySelector("#wbSyncX").addEventListener("click", function () { mask.classList.add("hidden"); });
+  mask.addEventListener("click", function (e) { if (e.target === mask) mask.classList.add("hidden"); });
+  btn.addEventListener("click", function () { render(); mask.classList.remove("hidden"); });
+
+  function setState(s, msg) {
+    cur.state = s; cur.msg = msg || "";
+    btn.textContent = "云同步 · " + (STATUS[s] || s);
+    btn.className = s === "error" ? "err" : (s === "syncing" ? "busy" : "");
+  }
+  function toast(msg) {
+    try {
+      var t = document.getElementById("toast");
+      if (!t) return;
+      t.textContent = msg; t.classList.remove("hidden");
+      clearTimeout(timerTip); timerTip = setTimeout(function () { t.classList.add("hidden"); }, 2200);
+    } catch (e) {}
+  }
+  var mode = "pw";      // pw = 邮箱+密码；code = 邮箱验证码（首次注册 / 忘记密码）
+  var pending = null;   // code 模式下 signInWithOtp 返回的句柄
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function emsg(e) {
+    if (!e) return "操作失败，请重试";
+    var m = e.message || "";
+    if (/credential|password|Password/i.test(m) || e.kind === "credentials_rejected") return "邮箱或密码不正确";
+    if (/not found|no user|exist/i.test(m)) return "该邮箱尚未注册，请改用邮箱验证码注册";
+    return m || "操作失败，请重试";
+  }
+  function afterLogin() {
+    return ensureSession().then(function (s) {
+      if (!s) { body.querySelector("#wbErr").textContent = "登录态获取失败，请重试"; return; }
+      sess = s; rememberEmail(emailOf(s)); pending = null;
+      var m = meta(); if (m.uid && m.uid !== sessUid()) { }
+      mask.classList.add("hidden"); setState("syncing"); render();
+      pull("login");
+    });
+  }
+  function render() {
+    if (!cloud) {
+      body.innerHTML = '<div class="wb-e" style="min-height:0">云端服务未就绪：' + esc(cur.msg || "SDK 未加载") + '</div>' +
+        '<div class="wb-t">不影响正常使用，数据仍保存在本机浏览器。</div>';
+      return;
+    }
+    if (sess) {
+      var m = meta(), em = emailOf(sess) || lastEmail();
+      body.innerHTML =
+        '<div class="wb-ok">已登录，云端同步已开启</div>' +
+        '<div class="wb-t">账号：' + esc(em) + '<br>设备：' + esc(DEVICE) +
+        '<br>上次同步：' + (m.updatedAt ? m.updatedAt.replace("T", " ").slice(0, 19) : "—") + '</div>' +
+        '<button class="wb-w" id="wbNow">立即同步</button>' +
+        '<button class="wb-s" id="wbOut">退出登录</button>' +
+        '<div class="wb-t">登录状态已保存在本机，下次打开浏览器无需重新登录。<br>退出后本机数据仍保留在浏览器本地。</div>';
+      body.querySelector("#wbNow").addEventListener("click", function () { mask.classList.add("hidden"); pull("manual"); });
+      body.querySelector("#wbOut").addEventListener("click", function () {
+        cloud.auth.signOut().then(function () { sess = null; setState("out"); render(); })
+          .catch(function () { sess = null; setState("out"); render(); });
+      });
+      return;
+    }
+    if (mode === "code") { renderCode(); return; }
+    renderPw();
+  }
+
+  /* ---------- 邮箱 + 密码（日常登录） ---------- */
+  function renderPw() {
+    body.innerHTML =
+      '<div class="wb-t">用邮箱登录后，产品目录 / 收藏 / 候选池 / 持仓台账会在 Chrome、Firefox、手机、平板之间自动同步。<br>登录状态会保留，下次打开浏览器无需重新登录。</div>' +
+      '<input id="wbEmail" type="email" autocomplete="username" spellcheck="false" placeholder="邮箱，如 you@gmail.com" value="' + esc(lastEmail()) + '">' +
+      '<input id="wbPwd" type="password" autocomplete="current-password" placeholder="密码">' +
+      '<div class="wb-e" id="wbErr"></div>' +
+      '<button class="wb-w" id="wbLogin">登录</button>' +
+      '<button class="wb-s" id="wbMode">首次使用 / 忘记密码 → 用邮箱验证码</button>' +
+      '<div class="wb-t">未登录时照常使用，数据只存在本机浏览器里。</div>';
+    var email = body.querySelector("#wbEmail"), pwd = body.querySelector("#wbPwd"),
+        errEl = body.querySelector("#wbErr"), loginBtn = body.querySelector("#wbLogin");
+    body.querySelector("#wbMode").addEventListener("click", function () { mode = "code"; render(); });
+    [email, pwd].forEach(function (i) { i.addEventListener("input", function () { errEl.textContent = ""; }); });
+    pwd.addEventListener("keydown", function (e) { if (e.key === "Enter") loginBtn.click(); });
+    loginBtn.addEventListener("click", function () {
+      var em = (email.value || "").trim(), pw = pwd.value || "";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { errEl.textContent = "请输入正确的邮箱地址"; return; }
+      if (pw.length < 6) { errEl.textContent = "请输入密码（至少 6 位）"; return; }
+      errEl.textContent = "登录中…"; loginBtn.disabled = true;
+      cloud.auth.signInWithPassword({ email: em, password: pw }).then(function (r) {
+        loginBtn.disabled = false;
+        if (r.error) { errEl.textContent = emsg(r.error); return; }
+        errEl.textContent = "";
+        return afterLogin();
+      }).catch(function (e) {
+        loginBtn.disabled = false; errEl.textContent = (e && e.message) || "登录失败，请重试";
+      });
+    });
+  }
+
+  /* ---------- 邮箱验证码（首次注册并设置密码） ---------- */
+  function renderCode() {
+    body.innerHTML =
+      '<div class="wb-t">首次使用请用邮箱验证码注册，并设置一个密码；注册完成后，所有设备都可以直接用邮箱 + 密码登录。</div>' +
+      '<input id="wbEmail" type="email" autocomplete="username" spellcheck="false" placeholder="邮箱，如 you@gmail.com" value="' + esc(lastEmail()) + '">' +
+      '<div class="wb-row"><input id="wbCode" type="text" inputmode="numeric" maxlength="8" placeholder="邮箱收到的验证码">' +
+      '<button class="wb-b" id="wbSend">发送验证码</button></div>' +
+      '<input id="wbNewPwd" type="password" autocomplete="new-password" placeholder="设置密码（≥6 位，老用户可留空）">' +
+      '<div class="wb-e" id="wbErr"></div>' +
+      '<button class="wb-w" id="wbVerify">验证并登录 / 注册</button>' +
+      '<button class="wb-s" id="wbBack">已有密码 → 用密码登录</button>';
+    var email = body.querySelector("#wbEmail"), code = body.querySelector("#wbCode"),
+        np = body.querySelector("#wbNewPwd"), errEl = body.querySelector("#wbErr"),
+        sendBtn = body.querySelector("#wbSend");
+    body.querySelector("#wbBack").addEventListener("click", function () { mode = "pw"; pending = null; render(); });
+    email.addEventListener("input", function () { errEl.textContent = ""; pending = null; });
+    sendBtn.addEventListener("click", function () {
+      var em = (email.value || "").trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { errEl.textContent = "请输入正确的邮箱地址"; return; }
+      errEl.textContent = ""; sendBtn.disabled = true; sendBtn.textContent = "发送中…";
+      cloud.auth.signInWithOtp({ email: em }).then(function (r) {
+        if (r.error) { sendBtn.disabled = false; sendBtn.textContent = "发送验证码"; errEl.textContent = emsg(r.error); return; }
+        pending = { email: em, h: r.data };
+        rememberEmail(em);
+        countdown = 60;
+        clearInterval(cdTimer);
+        cdTimer = setInterval(function () {
+          countdown--;
+          if (countdown <= 0) { clearInterval(cdTimer); sendBtn.disabled = false; sendBtn.textContent = "重发验证码"; return; }
+          sendBtn.textContent = countdown + "s 后重发";
+        }, 1000);
+        sendBtn.textContent = countdown + "s 后重发";
+        errEl.textContent = pending.h && pending.h.isExistingUser ? "验证码已发送，请输入后登录" : "新邮箱，请输入验证码并设置密码";
+        code.focus();
+      }).catch(function (e) {
+        sendBtn.disabled = false; sendBtn.textContent = "发送验证码";
+        errEl.textContent = (e && e.message) || "验证码发送失败";
+      });
+    });
+    body.querySelector("#wbVerify").addEventListener("click", function () {
+      var em = (email.value || "").trim(), c = (code.value || "").trim(), pw = np.value || "";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { errEl.textContent = "请输入正确的邮箱地址"; return; }
+      if (!pending || pending.email !== em || !pending.h) { errEl.textContent = "请先点击「发送验证码」"; return; }
+      if (!/^\d{4,8}$/.test(c)) { errEl.textContent = "请输入邮箱收到的验证码"; return; }
+      if (pending.h.isExistingUser === false && pw.length < 6) { errEl.textContent = "新账号请设置一个至少 6 位的密码"; return; }
+      errEl.textContent = "验证中…";
+      pending.h.verify({ token: c, password: pw || undefined }).then(function (r) {
+        if (r && r.error) { errEl.textContent = emsg(r.error); return; }
+        errEl.textContent = "";
+        return afterLogin();
+      }).catch(function (e) {
+        errEl.textContent = (e && e.message) || "验证失败，请重试";
+      });
+    });
+  }
+
+  /* ---------- 启动 ---------- */
+  // SDK 按需加载：只有在本应用正式域名下才会去 CDN 拉取，其它环境不产生任何额外请求
+  function loadSdk() {
+    return new Promise(function (resolve, reject) {
+      if (window.WorkBuddyCloud) return resolve();
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js";
+      s.onload = function () { window.WorkBuddyCloud ? resolve() : reject(new Error("SDK 加载异常")); };
+      s.onerror = function () { reject(new Error("云端 SDK 加载失败，请检查网络")); };
+      document.head.appendChild(s);
+    });
+  }
+  function boot() {
+    loadSdk().then(function () {
+      cloud = window.WorkBuddyCloud.createWorkBuddyCloud({ endpoint: ENDPOINT, publishableKey: PUB_KEY });
+      start();
+    }).catch(function (e) {
+      setState("error", e.message);
+      btn.title = e.message;
+      render();
+    });
+  }
+  function start() {
+    var applied = "";
+    try { applied = sessionStorage.getItem(APPLIED) || ""; } catch (e) {}
+    render();
+    setState("syncing");
+    pull(applied ? "after-reload" : "boot");
+    // 跨设备：切回本页或每 3 分钟拉一次云端，别的设备改了这里也能跟上
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible" && sess && !busy) pull("visible");
+    });
+    setInterval(function () {
+      if (document.visibilityState === "visible" && sess && !busy) pull("auto");
+    }, 180000);
+  }
+  if (document.readyState === "complete") setTimeout(boot, 120);
+  else window.addEventListener("load", function () { setTimeout(boot, 120); });
+})();
+</script>
+
 </body>
 </html>
