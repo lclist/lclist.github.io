@@ -4601,24 +4601,29 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
 <script>
 /* ==========================================================================
- * 跨设备同步 · 通道二：Cloudflare Worker + KV（免登录）
+ * 跨设备同步 —— 跑在 lclist.github.io 上（Cloudflare 自建后端）
  *
- * 启用条件：仅在 *.github.io 下生效（lclist.github.io）。
- *   在 WorkBuddy 发布域名下本段直接 return，交给「邮箱登录」那一层处理；
- *   在 file:// / 127.0.0.1 下也不执行（本地 serve.mjs 没有 /api/state 路由）。
+ * 两种模式，互斥：
+ *   用户模式（推荐）：邮箱 + 密码登录，状态存 Cloudflare R2，按账号隔离。
+ *                    登录态存 localStorage，关浏览器再打开自动恢复，无需重登。
+ *   房间模式（兜底）：免登录，状态存 KV，按房间名隔离。默认公共，知道房间名即可读写。
  *
- * 隔离单位 = 房间名：默认房间 default 是公共的；换一个只有自己知道的房间名即可私有。
- * 无账号鉴权，知道房间名就能读写 —— 这是免登录换来的代价。
+ * 启用条件：仅在 *.github.io 下执行。WorkBuddy 发布域名交给「邮箱登录」那一段，
+ *           file:// / 127.0.0.1 不执行（本地 serve.mjs 没有这些路由）。
  *
- * 冲突策略：整份文档按 updatedAt 后写覆盖；删除类标记(hidden/deleted/deletedCands)与
- *           自建产品(custom)、字段修补(patches) 按 key 取并集，避免两台设备互相抹掉。
+ * 密码学：PBKDF2(email 为盐, 10 万次) 在浏览器算，只把 256bit 派生密钥发给服务端，
+ *         服务端再存 SHA-256(随机盐 + dk)。明文密码不出浏览器，服务端也没有明文。
  * ========================================================================== */
 (function () {
   "use strict";
-  var BASE     = "https://lclist-finance-api.lclist.workers.dev/api/state";
-  var ROOM_KEY = "observer_sync_room";
-  var META_KEY = "observer_sync_meta";
-  var APPLIED  = "_wb_kv_applied";
+  var BASE     = "https://lclist-finance-api.lclist.workers.dev";
+  var TOKEN_KEY = "observer_cf_token";
+  var EMAIL_KEY = "observer_cf_email";
+  var MODE_KEY  = "observer_sync_mode";   // user | room | off
+  var ROOM_KEY  = "observer_sync_room";
+  var META_KEY  = "observer_sync_meta";
+  var APPLIED   = "_wb_kv_applied";
+  var ITER      = 100000;
 
   var K = {
     reg: "observer_reg_v1", favs: "observer_favs", passed: "observer_passed",
@@ -4628,13 +4633,13 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   var WATCH = Object.keys(K).map(function (k) { return K[k]; });
 
   var host = location.hostname;
-  if (/(^|\.)workbuddy\.(host|link|cn)$/.test(host)) return;      // 交给邮箱登录层
+  if (/(^|\.)workbuddy\.(host|link|cn)$/.test(host)) return;
   if (location.protocol === "file:") return;
   if (!/(^|\.)github\.io$/.test(host)) return;
 
   var rawSet = localStorage.setItem.bind(localStorage);
   var rawGet = localStorage.getItem.bind(localStorage);
-  var timer = null, busy = false, tipTimer = null, cdTimer = null;
+  var timer = null, busy = false, tipTimer = null;
   var DEVICE = (function () {
     var m = /(Chrome|Firefox|Edg|Safari)\/[\d.]+/.exec(navigator.userAgent);
     return (m ? m[1] : "Browser") + " · " + ((navigator.platform || "") + "").slice(0, 12);
@@ -4643,18 +4648,44 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   function jget(k, d) { try { var v = rawGet(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
   function meta() { return jget(META_KEY, { updatedAt: "" }); }
   function setMeta(m) { try { rawSet(META_KEY, JSON.stringify(m)); } catch (e) {} }
+  function ls(k) { try { return rawGet(k) || ""; } catch (e) { return ""; } }
+  function lsSet(k, v) { try { rawSet(k, v); } catch (e) {} }
+  function mode() {
+    var m = ls(MODE_KEY);
+    if (m === "user" || m === "room" || m === "off") return m;
+    return ls(TOKEN_KEY) ? "user" : "room";
+  }
+  function setMode(m) { lsSet(MODE_KEY, m); }
   function room() {
-    var r = "";
-    try { r = (rawGet(ROOM_KEY) || "").trim(); } catch (e) {}
+    var r = (ls(ROOM_KEY) || "").trim();
     return r || "default";
   }
   function setRoom(r) {
-    r = String(r || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64) || "default";
-    try { rawSet(ROOM_KEY, r); } catch (e) {}
+    r = String(r || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+    lsSet(ROOM_KEY, r);
     return r;
   }
+  function token() { return ls(TOKEN_KEY); }
+  function email() { return ls(EMAIL_KEY); }
 
-  /* ---------- 状态采集 / 落盘 ---------- */
+  /* ---------- 密码派生（浏览器侧 PBKDF2） ---------- */
+  function hex(bytes) {
+    var s = "";
+    for (var i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, "0");
+    return s;
+  }
+  function derive(pass, emailStr) {
+    var enc = new TextEncoder();
+    return crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveBits"])
+      .then(function (key) {
+        return crypto.subtle.deriveBits(
+          { name: "PBKDF2", salt: enc.encode("lclist:v1:" + String(emailStr).trim().toLowerCase()),
+            iterations: ITER, hash: "SHA-256" }, key, 256);
+      })
+      .then(function (bits) { return hex(new Uint8Array(bits)); });
+  }
+
+  /* ---------- 状态采集 / 落盘 / 合并 ---------- */
   function collect() {
     return {
       v: 1, updatedAt: new Date().toISOString(), device: DEVICE,
@@ -4711,38 +4742,54 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   }
 
   /* ---------- 远端读写 ---------- */
-  function api(r) {
-    return BASE + "?room=" + encodeURIComponent(r);
+  function stateUrl() {
+    var m = mode();
+    if (m === "user") return BASE + "/api/state?token=" + encodeURIComponent(token());
+    return BASE + "/api/state?room=" + encodeURIComponent(room());
   }
   function remoteGet() {
-    return fetch(api(room()), { method: "GET", headers: { Accept: "application/json" } })
-      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+    return fetch(stateUrl(), { method: "GET", headers: { Accept: "application/json" } })
+      .then(function (r) {
+        if (r.status === 401) { onUnauth(); throw new Error("登录已失效，请重新登录"); }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      });
   }
   function remotePut(doc) {
-    return fetch(api(room()), {
+    return fetch(stateUrl(), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ doc: doc, updatedAt: doc.updatedAt, device: DEVICE })
-    }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+    }).then(function (r) {
+      if (r.status === 401) { onUnauth(); throw new Error("登录已失效，请重新登录"); }
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+  }
+  function onUnauth() {
+    lsSet(TOKEN_KEY, ""); setMode("off"); setState("idle", "登录已失效"); render();
   }
   function schedulePush() {
-    if (busy) return;
+    if (busy || mode() === "off") return;
+    if (mode() === "user" && !token()) return;
     clearTimeout(timer);
     timer = setTimeout(function () {
       var d = collect();
       setState("syncing");
-      remotePut(d).then(function () {
-        setMeta({ updatedAt: d.updatedAt }); setState("synced");
-      }).catch(function (e) { setState("error", e && e.message ? e.message : "网络异常"); });
+      remotePut(d).then(function () { setMeta({ updatedAt: d.updatedAt }); setState("synced"); })
+        .catch(function (e) { setState("error", e && e.message ? e.message : "网络异常"); });
     }, 1200);
   }
-  function sync(reason) {
-    if (busy) return;
+  function sync() {
+    if (busy || mode() === "off") return;
+    if (mode() === "user" && !token()) return;
     busy = true; setState("syncing");
     remoteGet().then(function (res) {
       var local = collect();
       if (!res || !res.doc || !res.doc.updatedAt) {
-        return remotePut(local).then(function () { busy = false; setMeta({ updatedAt: local.updatedAt }); setState("synced"); render(); });
+        return remotePut(local).then(function () {
+          busy = false; setMeta({ updatedAt: local.updatedAt }); setState("synced"); render();
+        });
       }
       var m = merge(local, res.doc);
       var needApply = stable(strip(m)) !== stable(strip(local));
@@ -4755,13 +4802,14 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
           setTimeout(function () { location.reload(); }, 700);
         });
       }
-      return remotePut(m).then(function () { busy = false; setMeta({ updatedAt: m.updatedAt }); setState("synced"); render(); });
+      return remotePut(m).then(function () {
+        busy = false; setMeta({ updatedAt: m.updatedAt }); setState("synced"); render();
+      });
     }).catch(function (e) {
       busy = false; setState("error", (e && e.message) || "网络异常");
     });
   }
 
-  /* ---------- 捕获本地写入：任何一处改动都会防抖回写云端 ---------- */
   localStorage.setItem = function (k, v) {
     rawSet(k, v);
     if (WATCH.indexOf(k) >= 0) schedulePush();
@@ -4783,11 +4831,11 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   st.textContent =
     "#wbKvBtn{position:fixed;right:10px;bottom:14px;z-index:9997;font:500 12px/1 -apple-system,PingFang SC,Microsoft YaHei,sans-serif;" +
       "padding:8px 12px;border:0;border-radius:999px;background:#1f7a5a;color:#fff;box-shadow:0 4px 14px rgba(20,80,60,.35);cursor:pointer}" +
-    "#wbKvBtn.err{background:#e02b2b}#wbKvBtn.busy{background:#6f9c8a}" +
+    "#wbKvBtn.err{background:#e02b2b}#wbKvBtn.busy{background:#6f9c8a}#wbKvBtn.off{background:#8a8a8a}" +
     "#wbKvMask{position:fixed;inset:0;z-index:9998;background:rgba(20,30,28,.45);display:flex;align-items:center;justify-content:center;padding:16px}" +
     "#wbKvMask.hidden{display:none}" +
     "#wbKvCard{width:100%;max-width:340px;background:#fff;border-radius:14px;padding:16px;box-shadow:0 10px 40px rgba(20,40,35,.35);" +
-      "font:400 13px/1.6 -apple-system,PingFang SC,Microsoft YaHei,sans-serif;color:#333}" +
+      "font:400 13px/1.6 -apple-system,PingFang SC,Microsoft YaHei,sans-serif;color:#333;max-height:86vh;overflow:auto}" +
     "#wbKvCard .kv-h{display:flex;justify-content:space-between;align-items:center;font-weight:500;font-size:15px;margin-bottom:10px}" +
     "#wbKvCard .kv-h button{border:0;background:transparent;font-size:16px;color:#888;cursor:pointer}" +
     "#wbKvCard input{width:100%;padding:9px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-top:8px;box-sizing:border-box}" +
@@ -4795,6 +4843,8 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     "#wbKvCard .kv-row input{margin-top:0;flex:1}" +
     "#wbKvCard button.kv-b{flex:0 0 auto;padding:9px 12px;border:0;border-radius:8px;background:#1f7a5a;color:#fff;font-size:13px;cursor:pointer;white-space:nowrap}" +
     "#wbKvCard button.kv-w{width:100%;margin-top:10px;padding:10px;border:0;border-radius:8px;background:#1f7a5a;color:#fff;font-size:14px;cursor:pointer}" +
+    "#wbKvCard button.kv-w:disabled{background:#9ec7b6;cursor:default}" +
+    "#wbKvCard button.kv-s{width:100%;margin-top:8px;padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#555;font-size:13px;cursor:pointer}" +
     "#wbKvCard .kv-t{color:#888;font-size:12px;margin-top:8px;word-break:break-all}" +
     "#wbKvCard .kv-e{color:#e02b2b;font-size:12px;margin-top:6px;min-height:16px}" +
     "#wbKvCard .kv-ok{color:#0a9c46;font-size:12px;margin-top:6px}";
@@ -4808,7 +4858,7 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
   function setState(s, msg) {
     cur.state = s; cur.msg = msg || "";
     btn.textContent = "跨设备同步 · " + (STATUS[s] || s);
-    btn.className = s === "error" ? "err" : (s === "syncing" ? "busy" : "");
+    btn.className = s === "error" ? "err" : (s === "syncing" ? "busy" : (mode() === "off" ? "off" : ""));
     btn.title = cur.msg || "";
   }
   function toast(msg) {
@@ -4823,35 +4873,206 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
+  function isEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || "").trim()); }
+  function post(path, obj) {
+    return fetch(BASE + path, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj)
+    }).then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); });
+  }
+  function enterUser(tk, em) {
+    lsSet(TOKEN_KEY, tk); lsSet(EMAIL_KEY, em); setMode("user");
+    setState("syncing"); render();
+    // 登录后立刻把本机现有数据并进账号，换设备时数据不会丢
+    remotePut(collect()).then(function () { sync(); })
+      .catch(function (e) { setState("error", e && e.message ? e.message : "网络异常"); });
+  }
+
+  /* ---------- 面板渲染 ---------- */
+  var view = "login";
+  var recoverQuestion = "";
+  var recoverEmail = "";
+
   function render() {
-    var m = meta(), r = room();
+    var m = mode();
+    if (m === "user" && token()) return renderUser();
+    if (m === "room") return renderRoom();
+    return renderLogin();
+  }
+
+  function renderUser() {
+    var mt = meta();
     body.innerHTML =
-      '<div class="kv-ok">免登录跨设备同步已开启</div>' +
-      '<div class="kv-t">当前房间：<b>' + esc(r) + '</b><br>设备：' + esc(DEVICE) +
-      '<br>上次同步：' + (m.updatedAt ? m.updatedAt.replace("T", " ").slice(0, 19) : "—") + '</div>' +
-      '<div class="kv-row"><input id="kvRoom" type="text" spellcheck="false" placeholder="房间名（自定义即私有）" value="' + esc(r) + '">' +
+      '<div class="kv-ok">已登录，跨设备同步已开启</div>' +
+      '<div class="kv-t">账号：' + esc(email()) + '<br>设备：' + esc(DEVICE) +
+      '<br>上次同步：' + (mt.updatedAt ? mt.updatedAt.replace("T", " ").slice(0, 19) : "—") + '</div>' +
+      '<button class="kv-w" id="kvNow">立即同步</button>' +
+      '<button class="kv-s" id="kvOut">退出登录</button>' +
+      '<div class="kv-t">登录状态已保存在本机（90 天），下次打开浏览器无需重新登录。<br>' +
+      '数据在云端按账号隔离，别人看不到。</div>';
+    body.querySelector("#kvNow").addEventListener("click", function () { mask.classList.add("hidden"); sync(); });
+    body.querySelector("#kvOut").addEventListener("click", function () {
+      post("/api/auth/logout", { token: token() }).catch(function () {});
+      lsSet(TOKEN_KEY, ""); setMode("off"); setState("idle"); render();
+    });
+  }
+
+  function renderRoom() {
+    var mt = meta();
+    body.innerHTML =
+      '<div class="kv-ok">免登录房间模式</div>' +
+      '<div class="kv-t">当前房间：<b>' + esc(room()) + '</b><br>上次同步：' +
+      (mt.updatedAt ? mt.updatedAt.replace("T", " ").slice(0, 19) : "—") + '</div>' +
+      '<div class="kv-row"><input id="kvRoom" type="text" spellcheck="false" placeholder="房间名" value="' + esc(room()) + '">' +
       '<button class="kv-b" id="kvSave">切换</button></div>' +
       '<button class="kv-w" id="kvNow">立即同步</button>' +
-      '<div class="kv-t">在 Chrome、Firefox、手机、平板上打开同一个网址，填<b>相同房间名</b>，' +
-      '产品目录 / 收藏 / 候选池 / 持仓台账就会自动保持一致。<br>' +
-      '<b>注意：无账号鉴权，知道房间名的人都能读写，请设置一个不容易猜到的房间名。</b></div>';
-    body.querySelector("#kvNow").addEventListener("click", function () { mask.classList.add("hidden"); sync("manual"); });
+      '<button class="kv-s" id="kvGoLogin">改用邮箱账号登录（数据按账号隔离）</button>' +
+      '<div class="kv-t"><b>无鉴权：知道房间名的人都能读写，default 是公共房间。</b></div>';
+    body.querySelector("#kvNow").addEventListener("click", function () { mask.classList.add("hidden"); sync(); });
     body.querySelector("#kvSave").addEventListener("click", function () {
-      var v = (body.querySelector("#kvRoom").value || "").trim();
-      setRoom(v); render(); sync("room-change");
+      setRoom(body.querySelector("#kvRoom").value); render(); sync();
+    });
+    body.querySelector("#kvGoLogin").addEventListener("click", function () { view = "login"; renderLogin(); });
+  }
+
+  function renderLogin() {
+    var html = "";
+    if (view === "login") {
+      html =
+        '<div class="kv-t">用邮箱登录后，产品目录 / 收藏 / 候选池 / 持仓台账在 Chrome、Firefox、手机、平板之间自动同步。<br>登录状态保留 90 天，重开浏览器无需重新登录。</div>' +
+        '<input id="kvEm" type="email" autocomplete="username" spellcheck="false" placeholder="邮箱，如 you@gmail.com" value="' + esc(email()) + '">' +
+        '<input id="kvPw" type="password" autocomplete="current-password" placeholder="密码（至少 8 位）">' +
+        '<div class="kv-e" id="kvErr"></div>' +
+        '<button class="kv-w" id="kvLogin">登录</button>' +
+        '<button class="kv-s" id="kvGoReg">没有账号？注册一个</button>' +
+        '<button class="kv-s" id="kvGoRec">忘记密码</button>' +
+        '<button class="kv-s" id="kvGoRoom">不登录，用公共房间模式</button>';
+    } else if (view === "register") {
+      html =
+        '<div class="kv-t">注册不需要收邮件。请设一个<strong>安全问题</strong>——它是忘记密码时唯一能找回的途径。</div>' +
+        '<input id="kvEm" type="email" autocomplete="username" spellcheck="false" placeholder="邮箱，如 you@gmail.com">' +
+        '<input id="kvPw" type="password" autocomplete="new-password" placeholder="密码（至少 8 位）">' +
+        '<input id="kvQ" type="text" placeholder="安全问题，如：我的小学名字">' +
+        '<input id="kvA" type="text" placeholder="安全问题的答案">' +
+        '<div class="kv-e" id="kvErr"></div>' +
+        '<button class="kv-w" id="kvReg">注册并登录</button>' +
+        '<button class="kv-s" id="kvBack">已有账号，去登录</button>';
+    } else if (view === "recover") {
+      html =
+        '<div class="kv-t">输入注册时用的邮箱，取回安全问题。</div>' +
+        '<input id="kvEm" type="email" autocomplete="username" spellcheck="false" placeholder="邮箱">' +
+        '<div class="kv-e" id="kvErr"></div>' +
+        '<button class="kv-w" id="kvRec">取回安全问题</button>' +
+        '<button class="kv-s" id="kvBack">返回登录</button>';
+    } else {
+      html =
+        '<div class="kv-ok">安全问题：' + esc(recoverQuestion) + '</div>' +
+        '<input id="kvA" type="text" placeholder="答案">' +
+        '<input id="kvPw" type="password" autocomplete="new-password" placeholder="新密码（至少 8 位）">' +
+        '<div class="kv-e" id="kvErr"></div>' +
+        '<button class="kv-w" id="kvReset">重置密码并登录</button>' +
+        '<button class="kv-s" id="kvBack">返回登录</button>';
+    }
+    body.innerHTML = html;
+
+    var errEl = body.querySelector("#kvErr");
+    var emEl = body.querySelector("#kvEm"), pwEl = body.querySelector("#kvPw");
+    if (emEl && pwEl) pwEl.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { var b = body.querySelector(".kv-w"); if (b) b.click(); }
+    });
+    function back() { view = "login"; renderLogin(); }
+    var backBtn = body.querySelector("#kvBack");
+    if (backBtn) backBtn.addEventListener("click", back);
+    var goReg = body.querySelector("#kvGoReg");
+    if (goReg) goReg.addEventListener("click", function () { view = "register"; renderLogin(); });
+    var goRec = body.querySelector("#kvGoRec");
+    if (goRec) goRec.addEventListener("click", function () { view = "recover"; renderLogin(); });
+    var goRoom = body.querySelector("#kvGoRoom");
+    if (goRoom) goRoom.addEventListener("click", function () { setMode("room"); render(); sync(); });
+
+    var loginBtn = body.querySelector("#kvLogin");
+    if (loginBtn) loginBtn.addEventListener("click", function () {
+      var em = (emEl.value || "").trim(), pw = pwEl.value || "";
+      if (!isEmail(em)) { errEl.textContent = "请输入正确的邮箱"; return; }
+      if (pw.length < 8) { errEl.textContent = "密码至少 8 位"; return; }
+      errEl.textContent = "登录中…"; loginBtn.disabled = true;
+      derive(pw, em).then(function (dk) {
+        return post("/api/auth/login", { email: em, dk: dk });
+      }).then(function (r) {
+        loginBtn.disabled = false;
+        if (!r.body || !r.body.ok) { errEl.textContent = (r.body && r.body.error) || "登录失败"; return; }
+        mask.classList.add("hidden");
+        enterUser(r.body.token, r.body.email || em);
+      }).catch(function (e) {
+        loginBtn.disabled = false; errEl.textContent = (e && e.message) || "登录失败，请重试";
+      });
+    });
+
+    var regBtn = body.querySelector("#kvReg");
+    if (regBtn) regBtn.addEventListener("click", function () {
+      var em = (emEl.value || "").trim(), pw = pwEl.value || "";
+      var q = (body.querySelector("#kvQ").value || "").trim();
+      var a = (body.querySelector("#kvA").value || "").trim();
+      if (!isEmail(em)) { errEl.textContent = "请输入正确的邮箱"; return; }
+      if (pw.length < 8) { errEl.textContent = "密码至少 8 位"; return; }
+      if (q.length < 2) { errEl.textContent = "请填写安全问题"; return; }
+      if (a.length < 1) { errEl.textContent = "请填写安全问题答案"; return; }
+      errEl.textContent = "注册中…"; regBtn.disabled = true;
+      Promise.all([derive(pw, em), derive(a, em + "|answer")]).then(function (r) {
+        return post("/api/auth/register", { email: em, dk: r[0], question: q, answerDk: r[1] });
+      }).then(function (res) {
+        regBtn.disabled = false;
+        if (!res.body || !res.body.ok) { errEl.textContent = (res.body && res.body.error) || "注册失败"; return; }
+        mask.classList.add("hidden");
+        enterUser(res.body.token, res.body.email || em);
+      }).catch(function (e) {
+        regBtn.disabled = false; errEl.textContent = (e && e.message) || "注册失败，请重试";
+      });
+    });
+
+    var recBtn = body.querySelector("#kvRec");
+    if (recBtn) recBtn.addEventListener("click", function () {
+      var em = (emEl.value || "").trim();
+      if (!isEmail(em)) { errEl.textContent = "请输入正确的邮箱"; return; }
+      errEl.textContent = "查询中…";
+      post("/api/auth/recover", { email: em }).then(function (r) {
+        if (!r.body || !r.body.ok) { errEl.textContent = (r.body && r.body.error) || "查询失败"; return; }
+        recoverQuestion = r.body.question || "";
+        recoverEmail = em;
+        view = "reset"; renderLogin();
+      }).catch(function (e) { errEl.textContent = (e && e.message) || "查询失败"; });
+    });
+
+    var resetBtn = body.querySelector("#kvReset");
+    if (resetBtn) resetBtn.addEventListener("click", function () {
+      var em = String(recoverEmail || email() || "").trim();
+      var a = (body.querySelector("#kvA").value || "").trim();
+      var pw = pwEl.value || "";
+      if (pw.length < 8) { errEl.textContent = "新密码至少 8 位"; return; }
+      if (!a) { errEl.textContent = "请填写答案"; return; }
+      errEl.textContent = "重置中…"; resetBtn.disabled = true;
+      Promise.all([derive(a, em + "|answer"), derive(pw, em)]).then(function (r) {
+        return post("/api/auth/reset", { email: em, answerDk: r[0], dk: r[1] });
+      }).then(function (res) {
+        resetBtn.disabled = false;
+        if (!res.body || !res.body.ok) { errEl.textContent = (res.body && res.body.error) || "重置失败"; return; }
+        mask.classList.add("hidden");
+        enterUser(res.body.token, res.body.email || em);
+      }).catch(function (e) {
+        resetBtn.disabled = false; errEl.textContent = (e && e.message) || "重置失败";
+      });
     });
   }
 
   /* ---------- 启动 ---------- */
   function start() {
     render();
-    setState("syncing");
-    sync("boot");
+    if (mode() !== "off") { setState("syncing"); sync(); }
+    else setState("idle");
     document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "visible" && !busy) sync("visible");
+      if (document.visibilityState === "visible" && !busy && mode() !== "off") sync();
     });
     setInterval(function () {
-      if (document.visibilityState === "visible" && !busy) sync("auto");
+      if (document.visibilityState === "visible" && !busy && mode() !== "off") sync();
     }, 180000);
   }
   if (document.readyState === "complete") setTimeout(start, 200);
