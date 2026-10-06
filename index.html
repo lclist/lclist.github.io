@@ -4610,6 +4610,9 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
 
 
+
+
+
 <script>
 /* ==========================================================================
  * 跨设备同步（邮箱登录） —— 跑在 lclist.github.io 上（Cloudflare 自建后端）
@@ -5052,8 +5055,21 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
 
   /* ---------- 触发入口（自适应） ---------- */
   function setupTrigger() {
-    // 优先级：产品管理页有「导出」→ 在其左侧注入「跨设备同步」按钮（头像保留为数据源状态）；
-    //         否则若主页有 V 头像 → 改成登录小人；再否则右上角浮动小人兜底。
+    // 主页（index.html）：把右上角 V 头像改成登录小人；
+    // 其它页（管理/详情/添加）：在「导出」按钮左侧注入「跨设备同步」按钮，头像保留为数据源状态。
+    var isHome = /(^|\/)(index\.html)?$/.test(location.pathname);
+    if (isHome) {
+      var el = document.getElementById("btnSettings");
+      if (el && el.classList.contains("avatar")) {
+        el.innerHTML = PERSON_SVG;       // V 头像 → 登录小人
+        el.title = "登录 / 跨设备同步";
+        el.setAttribute("role", "button");
+        el.setAttribute("aria-label", "登录 / 跨设备同步");
+        el.classList.add("wb-login-trigger");
+        el.addEventListener("click", function (e) { e.preventDefault(); openLogin(); });
+        return el;
+      }
+    }
     var exp = document.getElementById("btnExport");
     if (exp) {
       var b = document.createElement("button");
@@ -5064,16 +5080,6 @@ window.CANDIDATES = [{"prodId":"WJ3M126A","prodName":"平安理财稳健精选�
       exp.parentNode.insertBefore(b, exp);   // 放到「导出」左侧
       b.addEventListener("click", openLogin);
       return b;
-    }
-    var el = document.getElementById("btnSettings");
-    if (el && el.classList.contains("avatar")) {
-      el.innerHTML = PERSON_SVG;       // V 头像 → 登录小人（仅主页）
-      el.title = "登录 / 跨设备同步";
-      el.setAttribute("role", "button");
-      el.setAttribute("aria-label", "登录 / 跨设备同步");
-      el.classList.add("wb-login-trigger");
-      el.addEventListener("click", function (e) { e.preventDefault(); openLogin(); });
-      return el;
     }
     var fb = document.createElement("button");
     fb.type = "button"; fb.id = "wbLoginFloat"; fb.innerHTML = PERSON_SVG;
