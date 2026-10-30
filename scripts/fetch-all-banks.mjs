@@ -95,7 +95,11 @@ function normalizeJsbCeb(res, prev, bank, st) {
   obj.code = res.code || prev.code;
   obj.name = res.name != null ? res.name : prev && prev.name != null ? prev.name : st && st.name != null ? st.name : null;
   obj.manager = res.manager != null ? res.manager : prev && prev.manager != null ? prev.manager : st && st.manager != null ? st.manager : null;
-  if (Array.isArray(res.series) && res.series.length) obj.series = res.series;
+  // 2026-10-30：jsb/ceb 浏览器腿同样**按日期并集**、不覆盖式替换——
+  //   该腿有时只回部分历史（如 J09652 242→91），覆盖会把整段历史冲掉。
+  if (Array.isArray(res.series) && res.series.length) {
+    obj.series = mergeSeriesByDate(prev && Array.isArray(prev.series) ? prev.series : null, res.series, true);
+  }
   else if (prev && Array.isArray(prev.series)) obj.series = prev.series;
   obj.nav = res.nav != null ? res.nav : prev && prev.nav != null ? prev.nav : null;
   obj.navDate = res.navDate != null ? res.navDate : prev && prev.navDate != null ? prev.navDate : null;
@@ -154,10 +158,38 @@ async function fetchJsbCeb(products) {
 
 /* ---------- 其余银行：调线上 Worker ---------- */
 
-async function fetchViaWorker(code, bank) {
+// 已有记录的最后一个净值日（增量抓取的 since）——没有序列则传 null（走全量）
+function lastDateOf(rec) {
+  const s = rec && Array.isArray(rec.series) ? rec.series : null;
+  if (!s || !s.length) return null;
+  for (let i = s.length - 1; i >= 0; i--) if (s[i] && s[i][0]) return String(s[i][0]);
+  return null;
+}
+
+// 按日期并集合并（旧序列 + 新序列）
+// ⚠ 2026-10-30 起**永不覆盖式替换**：上游有时只回部分历史（如 jsb 242→91、boc 415→230），
+//   或来源切换（bob→fminbank）时新序列点数更少 —— 直接替换会把整段历史冲掉。
+// newWins：同日期冲突时是否以新值为准。
+//   · 同来源 → true（可修正上游更正的旧值）
+//   · 异来源 → false（保留旧值，避免两种口径的单位净值/万份收益混在一段曲线里）
+function mergeSeriesByDate(prev, neu, newWins) {
+  const m = new Map();
+  for (const p of (prev || [])) if (p && p[0]) m.set(String(p[0]), p);
+  for (const p of (neu || [])) if (p && p[0]) {
+    const k = String(p[0]);
+    if (m.has(k) && newWins === false) continue;
+    m.set(k, p);
+  }
+  return [...m.values()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
+
+async function fetchViaWorker(code, bank, since) {
+  // since：增量（只补缺失/新增点），避免每小时重翻全量历史（中邮等 25 页产品省时显著）
+  // noCache=1：CDN 缓存 TTL 6h，同一 since 的结果会被缓存住 → 主动回源，保证当轮真实
   const url =
     WORKER_BASE + "/api/product?code=" + encodeURIComponent(code) +
-    "&issuer=" + encodeURIComponent(bank) + "&mode=nav";
+    "&issuer=" + encodeURIComponent(bank) + "&mode=nav&noCache=1" +
+    (since ? "&since=" + encodeURIComponent(since) : "");
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), WORKER_TIMEOUT_MS);
   try {
@@ -190,14 +222,22 @@ function mergeWorkerRecord(existing, R) {
   merged.manager = R.manager || existing.manager || null;
   if (R.benchmark) merged.benchmark = R.benchmark;
   if (R.quota != null) merged.quota = R.quota;
-  merged.series = series;
-  merged.nav = last ? last[1] : existing.nav;
-  merged.navDate = last ? last[0] : existing.navDate;
+  // 2026-10-30：序列一律按日期并集，**永不覆盖式替换**（避免上游只回部分历史时冲掉整段历史）
+  const isInc = !!(R.nav && R.nav.navIncremental);
+  const prevSeries = existing && Array.isArray(existing.series) ? existing.series : null;
+  const sameSrc = !!(existing && existing.navVia && R.navVia && String(existing.navVia) === String(R.navVia));
+  const finalSeries = (isInc || (prevSeries && prevSeries.length))
+    ? mergeSeriesByDate(prevSeries, series, isInc ? true : sameSrc)
+    : series;
+  merged.series = finalSeries;
+  const lastF = finalSeries[finalSeries.length - 1];
+  merged.nav = lastF ? lastF[1] : existing.nav;
+  merged.navDate = lastF ? lastF[0] : existing.navDate;
   // 保留 existing 的静态字段：risk / holdDays / established / regCode / kind / gha
   return merged;
 }
 
-async function fetchWorkerBatch(products) {
+async function fetchWorkerBatch(products, real) {
   const out = {};
   let idx = 0;
   const worker = async () => {
@@ -206,7 +246,8 @@ async function fetchWorkerBatch(products) {
       if (i >= products.length) break;
       const p = products[i];
       try {
-        const R = await fetchViaWorker(p.code, p.bank);
+        // 增量：带上本地已有序列的最后净值日 → Worker 只补缺失/新增点
+        const R = await fetchViaWorker(p.code, p.bank, lastDateOf(real ? real[p.code] : null));
         if (R) out[p.code] = R;
       } catch (e) {
         console.warn("[all] " + p.code + " Worker 抓取失败：" + (e && e.message));
@@ -245,7 +286,7 @@ async function main() {
 
   // 2) 其余银行走 Worker
   const others = products.filter((p) => p.bank !== JSB_BANK && p.bank !== CEB_BANK && p.bank);
-  const workerResults = await fetchWorkerBatch(others);
+  const workerResults = await fetchWorkerBatch(others, real);
   let merged = 0, skipped = 0;
   for (const p of others) {
     const R = workerResults[p.code];
