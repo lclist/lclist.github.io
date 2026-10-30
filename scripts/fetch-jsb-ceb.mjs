@@ -282,10 +282,23 @@ async function main() {
   try { await cebMod.closeCebWebBrowser(); } catch (e) {}
 
   // 写回净值数据.json（保持外层 compact 结构）
+  // 优化：仅当 jsb/ceb 净值内容真正变化时才写盘 / 更新 savedAt，
+  // 避免每小时空跑产生无意义 commit（NAV 通常每日仅更新一次）
+  const prevRealStr = (outer.data && outer.data.observer_lookup_real) || "";
+  const newRealStr = JSON.stringify(real);
   outer.data = outer.data || {};
-  outer.data.observer_lookup_real = JSON.stringify(real);
-  outer.savedAt = new Date().toISOString();
   outer.count = Object.keys(real).length;
+
+  if (newRealStr === prevRealStr) {
+    const okCount = results.filter((r) => r.ok).length;
+    const ms = ((Date.now() - t0) / 1000).toFixed(1);
+    console.log("[jsb-ceb] 完成：成功 " + okCount + "/" + results.length + "，用时 " + ms + "s，净值无变化，跳过写盘");
+    console.log("[jsb-ceb] 明细：" + JSON.stringify(results));
+    return;
+  }
+
+  outer.data.observer_lookup_real = newRealStr;
+  outer.savedAt = new Date().toISOString();
   fs.writeFileSync(NAV_FILE, JSON.stringify(outer), "utf8");
 
   const okCount = results.filter((r) => r.ok).length;

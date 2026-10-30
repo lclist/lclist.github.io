@@ -2,8 +2,10 @@ name: 刷新 jsb/ceb 净值
 
 on:
   schedule:
-    # 每天 16:00 UTC = 北京 00:00（次日），确保当日净值已披露；cron 以 UTC 计
-    - cron: "0 16 * * *"
+    # 每小时整点触发（00:00、01:00、…、23:00），cron 以 UTC 计，小时级在任意时区都是每小时
+    # 仅刷新 jsb/ceb 共 7 只（这 7 只 Worker/浏览器抓不到，必须靠本脚本）；
+    # 其余银行净值由前端打开页面时经 Cloudflare Worker 实时抓取，不在此工作流范围
+    - cron: "0 * * * *"
   workflow_dispatch: {}   # 允许手动触发（调试用）
 
 permissions:
