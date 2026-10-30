@@ -84,6 +84,10 @@ button { font-family: inherit; border: none; background: none; cursor: pointer; 
 /* 管理页标签（与概览 .big-tab 同款，但用 .mg-tab 以避免与全局 .big-tab 点击冲突） */
 .mg-tab { padding: 8px 22px; border-radius: 10px; font-size: calc(16px * var(--fs) * 0.95); font-weight: 600; color: #666; transition: all .15s; border: none; background: transparent; cursor: pointer; }
 .mg-tab.active { background: #1e6fff; color: #fff; box-shadow: 0 2px 8px rgba(30, 111, 255, .4); }
+/* 精选/候选 标签下方的小计数（所有银行产品总数） */
+.big-tab, .mg-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.12; gap: 1px; }
+.tab-count { font-size: calc(11px * var(--fs)); font-weight: 500; opacity: .7; letter-spacing: .3px; }
+.big-tab.active .tab-count, .mg-tab.active .tab-count { opacity: .95; }
 .head-icons { display: flex; gap: 6px; margin-left: auto; }
 /* 7 个图标时窄屏会整体换行，始终靠右 */
 .head-icons .icon-btn { color: #555; background: #f2f3f8; min-width: 30px; height: 32px; padding: 0 4px; font-size: calc(15px * min(var(--fs), 1.9)); }
@@ -782,8 +786,8 @@ var Fr={},Gr={};var Wr,Hr=function(){function t(t,e,n){var i=this;this._sleepAft
   <div class="panel">
     <div class="panel-head">
       <div class="big-tabs">
-        <button class="big-tab active" data-tab="short">精选</button>
-        <button class="big-tab" data-tab="candidate">候选</button>
+        <button class="big-tab active" data-tab="short">精选<span class="tab-count" id="cntShort">0</span></button>
+        <button class="big-tab" data-tab="candidate">候选<span class="tab-count" id="cntCand">0</span></button>
       </div>
       <div class="head-icons">
         <button class="icon-btn" id="btnRefresh" title="所有产品刷新"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
@@ -976,8 +980,8 @@ var Fr={},Gr={};var Wr,Hr=function(){function t(t,e,n){var i=this;this._sleepAft
     </header>
     <input type="file" id="fImport" accept="application/json,.json" class="hidden">
     <div class="big-tabs" id="mgTabs">
-      <button class="mg-tab active" data-mgtab="short">精选</button>
-      <button class="mg-tab" data-mgtab="candidate">候选</button>
+      <button class="mg-tab active" data-mgtab="short">精选<span class="tab-count" id="mgCntShort">0</span></button>
+      <button class="mg-tab" data-mgtab="candidate">候选<span class="tab-count" id="mgCntCand">0</span></button>
       <div class="mg-ops">
         <button class="btn-mini" id="btnExport" title="导出备份">导出</button>
         <button class="btn-mini" id="btnImport" title="导入备份">导入</button>
@@ -2771,7 +2775,7 @@ window.CANDIDATES = [];
       state.listRows = rows; // 批量刷新队列用：与页面渲染完全一致的最终行集
       state.footDefault = `候选产品共 ${rows.length} 个（点击「通过」加入我的产品）`;
       setFootMsg();
-      if (!rows.length) { tbody.innerHTML = ""; $("#emptyTip").classList.remove("hidden"); return; }
+      if (!rows.length) { tbody.innerHTML = ""; $("#emptyTip").classList.remove("hidden"); updateTabCounts(); return; }
       $("#emptyTip").classList.add("hidden");
       tbody.innerHTML = rows.map(r => rowHtml(r)).join("");
       return;
@@ -2810,6 +2814,7 @@ window.CANDIDATES = [];
     if (!rows.length) { tbody.innerHTML = ""; $("#emptyTip").classList.remove("hidden"); return; }
     $("#emptyTip").classList.add("hidden");
     tbody.innerHTML = rows.map(r => rowHtml(r)).join("");
+    updateTabCounts();
   }
 
   /* ---------- 表头排序 ---------- */
@@ -3238,6 +3243,29 @@ window.CANDIDATES = [];
     });
   }
 
+  /* 精选/候选 tab 下方小计数：按 bank:"all" 统计该状态下所有银行产品总数（与 renderMgBanks 口径一致） */
+  function tabTotalRows(tab) {
+    if (tab === "candidate") {
+      const activeCodes = new Set();
+      Engine.products({ bank: "all", tab: "all", sort: "name", order: "asc", q: "" }).forEach(r => activeCodes.add(r.code));
+      state.passed.forEach(c => activeCodes.add(c));
+      let rows = candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0 && !isToCand(r.code));
+      toCandRows().forEach(r => rows.push(r));
+      return rows.length;
+    }
+    let rows = Engine.products({ bank: "all", tab: "short", sort: "name", order: "asc", q: "" })
+      .filter(r => !isToCand(r.code) && state.deletedCands.indexOf(r.code) < 0);
+    const _active = new Set(rows.map(r => r.code));
+    candRowsAll().filter(r => state.passed.includes(r.code) && !_active.has(r.code) && !isToCand(r.code) && state.deletedCands.indexOf(r.code) < 0)
+      .forEach(r => rows.push(r));
+    return rows.length;
+  }
+  function updateTabCounts() {
+    const s = tabTotalRows("short"), c = tabTotalRows("candidate");
+    const map = { cntShort: s, cntCand: c, mgCntShort: s, mgCntCand: c };
+    for (const id in map) { const el = document.getElementById(id); if (el) el.textContent = map[id]; }
+  }
+
   function renderManage() {
     mgCheckAnchor = null; // 列表重建后重置连续选择起点
     let rows;
@@ -3270,6 +3298,7 @@ window.CANDIDATES = [];
       empty.textContent = state.mgTab === "candidate" ? "候选产品已空（全部已加入精选或删除）" : "暂无产品";
       empty.classList.remove("hidden");
       syncMgCheckAll();
+      updateTabCounts();
       return;
     }
     empty.classList.add("hidden");
@@ -3277,6 +3306,7 @@ window.CANDIDATES = [];
     box.innerHTML = rows.map(r => mgRowHtml(r, isCand)).join("");
     markMgSorted();
     syncMgCheckAll();
+    updateTabCounts();
   }
 
   const MG_NOTE = "点产品名称可修改信息，配置保存在服务器，建议定期「导出」备份";
