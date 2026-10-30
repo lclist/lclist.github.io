@@ -3889,7 +3889,7 @@ window.CANDIDATES = [];
   // 抓净值时发行银行不按 code 调 /api/predict 预判，改由本参数透传后端按 MANAGER_TO_KEY
   // （口径同 predict 规则 JSON 的 manager_to_parent_key）换算成发行银行 key；仅添加新产品
   // （lookupProduct）时产品尚未入列、无此行内字段，才走 /api/predict 预判。
-  function fetchProductUnified(code, issuer, agent, deadlineAt, name, regCode, infoComplete, benchmark, benchmarkKnown, mode, manager, force) {
+  function fetchProductUnified(code, issuer, agent, deadlineAt, name, regCode, infoComplete, benchmark, benchmarkKnown, mode, manager, force, since) {
     // —— 偏好银行标记（首次双抓定标后持久化；以后只抓该银行，不再试另一家）——
     let preferBank = null;
     try { const pm = JSON.parse(localStorage.getItem("observer_prefer_bank") || "{}"); preferBank = pm[code] || null; } catch (e) {}
@@ -3923,6 +3923,7 @@ window.CANDIDATES = [];
       // "all" 全抓，前端「只刷净值/只刷额度」按钮形同虚设。mode 为空（添加产品路径）则不传，
       // 由后端缺省 "all"。
       (mode ? "&mode=" + encodeURIComponent(mode) : "") +
+      (since ? "&since=" + encodeURIComponent(since) : "") +
       (force ? "&noCache=1" : "");
     const t0 = (typeof performance !== "undefined") ? performance.now() : Date.now();
     // /api/product 的净值主路径为银行/发行方接口（本地由本机 IP 直连，线上走 Cloudflare），
@@ -4031,6 +4032,9 @@ window.CANDIDATES = [];
       quotaText: (quota && quota.quotaText) || null,
       navVia: pr.navVia || null,
       navPort: (pr.navPort != null) ? pr.navPort : null,
+      // 2026-10-30 增量抓取：本轮净值腿按 since 只回「新增点」，可能 0 点（= 已是最新）。
+      // 该标记用于区分「增量腿跑通但无新增」与「真的没抓到」。
+      navIncremental: !!(nav && nav.navIncremental),
       // 双来源明细（2026-10-25）：后端 fetchProductFull 回 navSources 时原样带出
       navSources: (Array.isArray(pr.navSources) && pr.navSources.length > 1) ? pr.navSources : null,
     };
@@ -4588,7 +4592,15 @@ window.CANDIDATES = [];
     // 前端在 60s 处掐断、收不到后端分阶段耗时（时间分解恒显「抓取失败 60s」且无子项）。
     // 给中国理财网直连路径放宽到 130s 预算 + 下方 120s 取数超时，使其首刷即成功、且能回传时间分解子项。
     const _cwBudget = _forceCw ? 130000 : 60000;
-    const pr = await fetchProductUnified(code, _effIss, ag, Date.now() + _cwBudget, name || null, _useReg, infoComplete, storedBench, benchKnown, mode, _effMgr, force).catch(() => null);
+    // 增量抓取：刷新（非添加产品）时把本地已有序列的最后净值日作为 since 透传后端，
+    // 后端只翻到追上 since 的页、只回缺失/新增点，避免重翻全量历史（中邮等翻页产品省时显著）。
+    // 添加产品走 fetchFromServer→/fetch（不经本函数）故不带 since → 恒全量历史。
+    let _since = null;
+    try {
+      const _ex = (window.MULTI_REAL && window.MULTI_REAL[code] && window.MULTI_REAL[code].series) || [];
+      if (_ex.length && _ex[_ex.length - 1][0]) _since = String(_ex[_ex.length - 1][0]);
+    } catch (e) {}
+    const pr = await fetchProductUnified(code, _effIss, ag, Date.now() + _cwBudget, name || null, _useReg, infoComplete, storedBench, benchKnown, mode, _effMgr, force, _since).catch(() => null);
     if (!pr) return false;
     const res = normalizeProductApi(pr);
     if (!res) return false;
@@ -4601,6 +4613,9 @@ window.CANDIDATES = [];
         res.quotaState != null || res.quotaText != null;
       if (!hasQuota) return false;
     } else if (!res.series || !res.series.length) {
+      // 2026-10-30 增量抓取：本轮无新增点 = 「已是最新」，属成功（不是失败）——
+      // 序列不变，标记「已刷新」即可，不应判为未抓到。
+      if (res.navIncremental) return true;
       return false; // 纯刷净值/全量却无序列 → 判失败（不误改信息）
     }
     // 实际落盘来源：优先用 navVia（chinawealth / 具体银行），icbc 产品线仍归 icbc
