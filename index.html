@@ -5585,18 +5585,24 @@ window.CANDIDATES = [];
       };
       for (const code in real) {
         const o = real[code];
-        if (!o || o.gha !== true) continue;          // 仅作用于方案 B 产出的 jsb/ceb 记录
+        if (!o) continue;
         const cur = existing[code];
-        if (!cur || _lastD(o) >= _lastD(cur)) { existing[code] = o; added++; }
+        if (o.gha === true) {
+          // 云端刷新优先：jsb/ceb 始终覆盖（线上 Worker 抓不到，必须靠云端定时任务）
+          if (!cur || _lastD(o) >= _lastD(cur)) { existing[code] = o; added++; }
+        } else {
+          // 其余银行：仅填补本机缺失的产品（新访客 / 尚未实时抓到的），不覆盖本机已有数据
+          if (!cur) { existing[code] = o; added++; }
+        }
       }
       if (!added) return;
       localStorage.setItem("observer_lookup_real", JSON.stringify(existing));
       window.MULTI_REAL = window.MULTI_REAL || {};
       for (const code in real) {
-        if (real[code] && real[code].gha === true) window.MULTI_REAL[code] = real[code];
+        if (real[code]) window.MULTI_REAL[code] = real[code];
       }
       if (window.Engine && typeof window.Engine.refresh === "function") window.Engine.refresh();
-      console.info("[gha] 已从同源 JSON 叠加 " + added + " 个 jsb/ceb 净值");
+      console.info("[gha] 已从同源 JSON 叠加 " + added + " 个净值（含 jsb/ceb 云端刷新 + 其余银行补缺）");
     } catch (e) {
       console.warn("[gha] 同源净值叠加失败（不影响其它银行）：" + ((e && e.message) || e));
     }

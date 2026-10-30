@@ -40,8 +40,8 @@ jobs:
       - name: 安装 puppeteer-core
         run: npm install puppeteer-core
 
-      - name: 批量抓取 jsb+ceb 并写回 净值数据.json
-        run: node scripts/fetch-jsb-ceb.mjs
+      - name: 批量抓取全银行净值并写回 净值数据.json
+        run: node scripts/fetch-all-banks.mjs
 
       - name: 提交（仅当 净值数据.json 有变化）
         run: |
