@@ -5592,12 +5592,46 @@ window.CANDIDATES = [];
     }
   }
 
+  /* ---------- 方案 B（续）：同源 registry 播种 ----------
+   * 全新访客（localStorage 无 observer_reg_v1）在 Pages 上看不到任何产品。
+   * 从同源 产品数据.json 播种目录，让新访客 / 跨设备直接看到产品 + 方案 B 的 jsb/ceb 净值。
+   * 仅当本页无目录时播种；本地（localhost）由 serve.mjs / data-sync 负责，不抢。
+   * 带超时兜底：同源文件即使慢 / 失败也不阻塞首屏渲染。 */
+  async function applyGhaRegSeed() {
+    const host = (location.hostname || "").toLowerCase();
+    const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+    if (isLocal) return;                                  // 本地不抢 serve.mjs 权威源
+    try {
+      const raw = localStorage.getItem(REG_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.custom) && parsed.custom.length > 0) return; // 已有目录，跳过
+      }
+    } catch (e) {}
+    const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
+    const done = await withTimeout((async () => {
+      const resp = await fetch("产品数据.json", { cache: "no-cache" });
+      if (!resp.ok) return false;
+      const p = await resp.json();
+      let regStr = p && p.data && p.data.observer_reg_v1;
+      if (!regStr) return false;
+      if (typeof regStr !== "string") regStr = JSON.stringify(regStr);
+      localStorage.setItem(REG_KEY, regStr);               // 文件里的 observer_reg_v1 已是合法 JSON 字符串
+      reg = loadReg();                                     // 重载内存中的 reg
+      if (typeof build === "function") build();
+      console.info("[gha] 已从同源 产品数据.json 播种产品目录（" + reg.custom.length + " 条）");
+      return true;
+    })(), 4000);
+    if (done === null) console.warn("[gha] 同源目录播种超时（首屏照常渲染，稍后刷新可见）");
+  }
+
   /* ---------- 初始化 ---------- */
-  function init() {
+  async function init() {
     bindConfirm();
     bindNotice();
     restoreLookupReal();
-    applyGhaNavOverlay();
+    await applyGhaNavOverlay();
+    await applyGhaRegSeed();
     // 「时间」按钮状态恢复：持久化为开 → 表格加 show-time、按钮置 active
     if (state.showTime) {
       const pt = document.querySelector("#tableWrap .ptable") || document.querySelector(".ptable");
