@@ -1865,13 +1865,23 @@ window.MULTI_REAL = window.MULTI_REAL || {};
     return { ok: true, found: false, reason: "NO_INDEX" };
   }
 
+  // 同源 registry 播种：把同源 产品数据.json 里的 observer_reg_v1 写入 localStorage，
+  // 并重载内存 reg + 重建产品列表。供前端逻辑块（另一 <script>）经 Engine 调用，避免跨块引用 reg/loadReg。
+  function seedRegistryFromString(str) {
+    try {
+      localStorage.setItem(REG_KEY, String(str));
+      reg = loadReg();
+      if (typeof build === "function") build();
+    } catch (e) { console.warn("[engine] seedRegistryFromString 失败：", (e && e.message) || e); }
+  }
+
   build();
 
   // 2026-10-22：内置种子修复逻辑随 SEEDS 整体移除而删除（原 repairDeletedSeeds 仅用于复活被删的内置种子，现已无内置种子）
 
   window.Engine = {
     BANKS, TERM_LABEL, TERM_DAYS, HOLIDAYS: Array.from(HOLIDAYS).sort(),
-    products, banks, product, refresh: build, rebuildBank,
+    products, banks, product, refresh: build, rebuildBank, seedRegistryFromString,
     checkCode, saveProduct, deleteProduct, mgProducts,
     exportData, importData, lookup,
     lastRefresh: () => store.last,
@@ -5602,7 +5612,7 @@ window.CANDIDATES = [];
     const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
     if (isLocal) return;                                  // 本地不抢 serve.mjs 权威源
     try {
-      const raw = localStorage.getItem(REG_KEY);
+      const raw = localStorage.getItem("observer_reg_v1");
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && Array.isArray(parsed.custom) && parsed.custom.length > 0) return; // 已有目录，跳过
@@ -5616,10 +5626,11 @@ window.CANDIDATES = [];
       let regStr = p && p.data && p.data.observer_reg_v1;
       if (!regStr) return false;
       if (typeof regStr !== "string") regStr = JSON.stringify(regStr);
-      localStorage.setItem(REG_KEY, regStr);               // 文件里的 observer_reg_v1 已是合法 JSON 字符串
-      reg = loadReg();                                     // 重载内存中的 reg
-      if (typeof build === "function") build();
-      console.info("[gha] 已从同源 产品数据.json 播种产品目录（" + reg.custom.length + " 条）");
+      localStorage.setItem("observer_reg_v1", regStr);     // 文件里的 observer_reg_v1 已是合法 JSON 字符串
+      if (window.Engine && typeof window.Engine.seedRegistryFromString === "function") {
+        window.Engine.seedRegistryFromString(regStr);      // 重载内存 reg + 重建列表（在引擎块内执行，避免跨块引用 reg/loadReg）
+      }
+      console.info("[gha] 已从同源 产品数据.json 播种产品目录");
       return true;
     })(), 4000);
     if (done === null) console.warn("[gha] 同源目录播种超时（首屏照常渲染，稍后刷新可见）");
@@ -5630,8 +5641,8 @@ window.CANDIDATES = [];
     bindConfirm();
     bindNotice();
     restoreLookupReal();
-    await applyGhaNavOverlay();
-    await applyGhaRegSeed();
+    try { await applyGhaNavOverlay(); } catch (e) { console.warn("[gha] 同源净值叠加失败（不影响其它银行）：" + ((e && e.message) || e)); }
+    try { await applyGhaRegSeed(); } catch (e) { console.warn("[gha] 同源目录播种失败（不影响其它功能）：" + ((e && e.message) || e)); }
     // 「时间」按钮状态恢复：持久化为开 → 表格加 show-time、按钮置 active
     if (state.showTime) {
       const pt = document.querySelector("#tableWrap .ptable") || document.querySelector(".ptable");
