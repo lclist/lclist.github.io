@@ -166,6 +166,8 @@ td.cell-name { box-shadow: 6px 0 8px -6px rgba(90, 80, 180, .18); }
 /* 收藏模式：隐藏银行卡片（银行筛选 chip），列表直接展示「不分银行」的所有收藏产品 */
 .hero.star-hidden .bank-row,
 .hero.star-hidden .search-row { display: none; }
+.hero.held-hidden .bank-row,
+.hero.held-hidden .search-row { display: none; }
 .val-red { color: var(--red); font-weight: 600; }
 .val-green { color: var(--green); font-weight: 600; }
 .val-zero { color: var(--orange); }
@@ -201,8 +203,15 @@ td.cell-name { box-shadow: 6px 0 8px -6px rgba(90, 80, 180, .18); }
 /* 0ms + 命中 = 进程内缓存（中国理财网 xpl 10 分钟缓存最常见）：标「缓存」，
    区别于「0ms 但 note=null」的真·无数据。冷抓一次后 10 分钟内再刷即此态。 */
 .col-breakdown .bk-cache { color: #7a68d8; font-weight: 600; }
-/* 刷信息跳过已齐产品：时间分解直接显示「齐全」 */
+/* 业绩比较基准可能是一整段监管披露原文（本次实测达 455 字），在窄列里会被 break-all
+   折成 50+ 行，把整行撑到 800px+ —— 表格行高由最高格决定，于是「时间分解」格被强行拉高、
+   内容只占顶部一小条，下方全是空白（用户报告的「时间分解空白占格」的真凶，与 breakdownHtml 无关）。
+   三重保险：① 内容剪短到 ≤150 字（trimBenchmark）；② 列宽加宽到 30 字（150 字 ≤5 行）；
+   ③ 仍给高度上限 + 内部滚动兜底，title 悬浮看全文。 */
+.ptable td.col-bench .bench-wrap { max-height: 6.5em; overflow-y: auto; }
 .col-breakdown .bk-complete { color: #1a7f37; font-weight: 600; }
+/* 时间分解过长时限制列高、内部滚动，避免单个产品占满整屏（2026-10-29） */
+.col-breakdown .bk-wrap { max-height: 16em; overflow-y: auto; }
 /* 抓取时间 / 时间分解 / 业绩比较基准 / 登记编码 / 持有期 / 风险 / 成立日期 七列：
    默认隐藏，点「时间」按钮（给 .ptable 加 show-time）才显示。
    （2026-10-14：业绩比较基准并入；2026-10-15：登记编码/持有期/风险/成立日期 四列并入，用户要求） */
@@ -212,11 +221,14 @@ td.cell-name { box-shadow: 6px 0 8px -6px rgba(90, 80, 180, .18); }
 .ptable.show-time .col-reg, .ptable.show-time .col-hold, .ptable.show-time .col-risk, .ptable.show-time .col-est { display: table-cell; }
 /* 「刷新」「时间」两个按钮的样式已统一移到 .foot 规则下方（.foot .foot-btns），
    见「状态条左侧按钮组」注释块。2026-10-14：改为蓝底白字 + flex 定间距。 */
-.col-quota { min-width: calc(98px * var(--fs)); white-space: nowrap; }
+.col-quota { min-width: calc(60px * var(--fs)); width: calc(60px * var(--fs)); white-space: nowrap; }
 .col-quota .quota-tag { margin-left: 0; }
 /* 新增 5 列（2026-10-13）：登记编码 / 持有期 / 风险 / 成立日期 / 业绩比较基准 */
 .ptable .col-reg { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ptable td.col-bench { max-width: calc(200px * var(--fs)); font-size: calc(10px * var(--fs)); color: #55555e; white-space: normal; word-break: break-all; line-height: 1.45; }
+/* 业绩比较基准列宽：30 字（用户 2026-10-29 要求）。基准内容已剪短到 ≤150 字，
+   30 字/行 → ≤5 行，不再把行撑高（原来 202px 只有 20 字/行，150 字要 8 行，
+   455 字要 23 行 → 整行 815px）。 */
+.ptable td.col-bench { min-width: calc(300px * var(--fs)); max-width: calc(300px * var(--fs)); font-size: calc(10px * var(--fs)); color: #55555e; white-space: normal; word-break: break-all; line-height: 1.45; }
 .src-badge { display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: calc(11px * var(--fs)); white-space: nowrap; line-height: 1.5; }
 .src-bank { color: #3a2f8f; background: #ece9fb; }
 .src-cw { color: #0a6b6b; background: #dff3f3; }
@@ -235,6 +247,8 @@ td.cell-name { box-shadow: 6px 0 8px -6px rgba(90, 80, 180, .18); }
 .risk-badge.r2 { color: #ec6f68; }
 .risk-badge.r3 { color: #2f9e63; }
 .risk-badge.r4, .risk-badge.r5 { color: #8a7fd0; }
+/* 持仓角标：已持仓产品的 R1/R2/R3 改为「$」（沿用 risk-badge 的右上角定位） */
+.risk-badge.hold-badge { color: var(--orange); font-weight: 700; }
 .demo-badge { display: inline-block; margin-left: 4px; font-size: calc(9px * var(--fs)); color: #9a6b00; background: #fff2cf; border: 1px solid #f0d9a3; border-radius: 6px; padding: 0 3px; vertical-align: middle; }
 .manual-badge { display: inline-block; margin-left: 4px; font-size: calc(9px * var(--fs)); color: #0a7a3a; background: #e3f7ea; border: 1px solid #b3e0c2; border-radius: 6px; padding: 0 3px; vertical-align: middle; }
 .empty { padding: 40px 0; text-align: center; color: #999; font-size: calc(14px * var(--fs)); }
@@ -773,6 +787,7 @@ var Fr={},Gr={};var Wr,Hr=function(){function t(t,e,n){var i=this;this._sleepAft
       </div>
       <div class="head-icons">
         <button class="icon-btn" id="btnRefresh" title="所有产品刷新"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+        <button class="icon-btn" id="btnHeld" title="只看持有"><span aria-hidden="true">$</span></button>
         <button class="icon-btn" id="btnStar" title="只看收藏"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" stroke="none" aria-hidden="true"><path d="M12 2.8l2.85 5.78 6.38.93-4.62 4.5 1.09 6.36L12 17.4l-5.7 3 1.09-6.37-4.62-4.5 6.38-.92z"/></svg></button>
         <button class="icon-btn" id="btnSearch" title="搜索"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.8" y1="16.8" x2="21" y2="21"/></svg></button>
         <button class="icon-btn" id="btnManage" title="产品管理（添加 / 修改 / 删除）"><svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
@@ -800,15 +815,14 @@ var Fr={},Gr={};var Wr,Hr=function(){function t(t,e,n){var i=this;this._sleepAft
         <th class="col-hold" data-key="holdDays">持有期</th>
         <th class="col-risk" data-key="risk">风险</th>
         <th class="col-est" data-key="established">成立日期</th>
+        <th class="col-bench" data-key="benchmark">业绩比较基准</th>
         <th class="col-quota" data-key="quota">额度</th>
         <th data-key="zeroDays30">月0/-</th>
         <th data-key="dailyWan">万收</th>
-        <th data-key="d1">当日</th>
         <th data-key="y7">7日年化</th>
         <th data-key="y14">14日年化</th>
         <th data-key="y1m">1月年化</th>
         <th data-key="y3m">3月年化</th>
-        <th data-key="y1y">1年年化</th>
         <th data-key="since">成立年化</th>
         <th data-key="p7_25" class="col-pct">7天2.5%</th>
         <th data-key="p7_30" class="col-pct">7天3%</th>
@@ -830,7 +844,6 @@ var Fr={},Gr={};var Wr,Hr=function(){function t(t,e,n){var i=this;this._sleepAft
         <th data-key="p30_50" class="col-pct">30天5%</th>
         <th data-key="cycleDays">最短持有</th>
         <th data-key="estDays">成立天数</th>
-        <th class="col-bench" data-key="benchmark">业绩比较基准</th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
@@ -985,14 +998,13 @@ var Fr={},Gr={};var Wr,Hr=function(){function t(t,e,n){var i=this;this._sleepAft
             <th class="col-check"><input type="checkbox" id="mgCheckAll" title="全选 / 取消全选"></th>
             <th class="col-name" data-mgkey="name">名称</th>
             <th data-mgkey="navDate">净值日</th>
+            <th class="col-quota" data-mgkey="quota">额度</th>
             <th data-mgkey="zeroDays30">月0/-</th>
             <th data-mgkey="dailyWan">万收</th>
-            <th data-mgkey="d1">当日</th>
             <th data-mgkey="y7">7日年化</th>
             <th data-mgkey="y14">14日年化</th>
             <th data-mgkey="y1m">1月年化</th>
             <th data-mgkey="y3m">3月年化</th>
-            <th data-mgkey="y1y">1年年化</th>
             <th data-mgkey="since">成立年化</th>
             <th data-mgkey="p7_25" class="col-pct">7天2.5%</th>
             <th data-mgkey="p7_30" class="col-pct">7天3%</th>
@@ -1442,6 +1454,7 @@ window.MULTI_REAL = window.MULTI_REAL || {};
       termLabel: seed.termDays ? `最短持有${seed.termDays}天` : (TERM_LABEL[seed.term] || ""),
       cycleDays: seed.termDays || TERM_DAYS[seed.term] || 1,
       risk: seed.risk, established: seed.established, benchmark: seed.benchmark,
+      benchmarkFull: seed.benchmarkFull || seed.benchmark || "",
       navDate: latestDs, nav: latestNav, dailyWan: lastWan,
       d1: Math.round(lastWan * 365.0 / 100.0 * 100) / 100,
       avg7, avg14, zeroDays30: zeros, negDays30: negs,
@@ -1515,7 +1528,7 @@ window.MULTI_REAL = window.MULTI_REAL || {};
       full: it.code && it.name.indexOf(it.code) >= 0
         ? `${it.manager}${it.name}` : `${it.manager}${it.name}（${it.code}）`,
       manager: it.manager, term: it.term, termDays: it.termDays || null, risk: it.risk,
-      established: it.established, benchmark: it.benchmark,
+      established: it.established, benchmark: it.benchmark, benchmarkFull: it.benchmarkFull || "",
       target: it.target, vol: it.vol, is_long: it.is_long,
     };
     const _real = (typeof window !== "undefined")
@@ -1538,7 +1551,11 @@ window.MULTI_REAL = window.MULTI_REAL || {};
         if (_real.manager && _nm.indexOf(_real.manager) === 0) _nm = _nm.slice(_real.manager.length).replace(/^[-·（\s]+/, "");
         seed.name = _nm;
       }
-      if (_real.benchmark && !_patch.benchmark) seed.benchmark = _real.benchmark;
+      if (_real.benchmark && !_patch.benchmark) {
+        seed.benchmark = _real.benchmark;
+        // 原文留档（列表里展示剪短版，详情/悬浮看全文）
+        if (_real.benchmarkFull) seed.benchmarkFull = _real.benchmarkFull;
+      }
       if (_real.remainQuota != null || _real.quotaState || _real.quotaText) {
         _quota = {
           remainQuota: _real.remainQuota,
@@ -1608,7 +1625,7 @@ window.MULTI_REAL = window.MULTI_REAL || {};
   }
 
   // ---------------- 排序（与后端 _sort_rows 一致） ----------------
-  const SORTABLE = new Set(["dailyWan", "d1", "avg7", "avg14", "y7", "y14", "y1m", "y3m", "y1y", "since",
+  const SORTABLE = new Set(["dailyWan", "avg7", "avg14", "y7", "y14", "y1m", "y3m", "since",
     "p7_25", "p7_30", "p7_35", "p7_40", "p7_45", "p7_50",
     "p14_25", "p14_30", "p14_35", "p14_40", "p14_45", "p14_50",
     "p30_25", "p30_30", "p30_35", "p30_40", "p30_45", "p30_50",
@@ -1906,6 +1923,7 @@ window.CANDIDATES = [];
     order: "desc",
     q: "",
     starOnly: false,
+    heldOnly: false,
     banks: [],
     rows: [],
     modes: {},
@@ -1991,6 +2009,43 @@ window.CANDIDATES = [];
     if (i >= 0) state.favs.splice(i, 1); else state.favs.push(code);
     localStorage.setItem("observer_favs", JSON.stringify(state.favs));
   }
+
+  /* ---------- 持有产品（¥加持仓 → ¥已持仓；主页「$」只看持有） ---------- */
+  // 持仓数据来自本地服务（serve.mjs）的 /api/holding-store 与 /api/products/latest；
+  // 这两个端点线上 Worker / GitHub Pages 不提供（404），故线上仅本地可用，失败则优雅降级。
+  let HELD_CODES = null;   // Set<product_code> 已建持仓且有成交；null 表示尚未加载 / 加载失败
+  let HELD_FAILED = false;
+  let HELD_LOADING = false;
+  async function loadHeldCodes(force) {
+    if (HELD_LOADING) return HELD_CODES;
+    if (HELD_CODES && !HELD_FAILED && !force) return HELD_CODES;
+    HELD_LOADING = true;
+    try {
+      const hs = await fetch("/api/holding-store");
+      if (!hs.ok) throw new Error("holding-store " + hs.status);
+      const sd = await hs.json().catch(() => null);
+      const list = (sd && Array.isArray(sd.holdings)) ? sd.holdings : [];
+      const held = list.filter(x => Array.isArray(x.trades) && x.trades.length > 0);
+      const codes = new Set();
+      if (held.length) {
+        const pl = await fetch("/api/products/latest?limit=500");
+        if (!pl.ok) throw new Error("products/latest " + pl.status);
+        const prods = await pl.json().catch(() => []);
+        const map = {};
+        (Array.isArray(prods) ? prods : []).forEach(p => { if (p.product_id != null) map[String(p.product_id)] = p.product_code || p.sale_code; });
+        held.forEach(x => { const c = map[String(x.productId)]; if (c) codes.add(c); });
+      }
+      HELD_CODES = codes;
+      HELD_FAILED = false;
+    } catch (e) {
+      HELD_CODES = null;
+      HELD_FAILED = true;
+    } finally {
+      HELD_LOADING = false;
+    }
+    return HELD_CODES;
+  }
+  function isCodeHeld(code) { return !!(HELD_CODES && HELD_CODES.has(code)); }
 
   /* ---------- 银行标签 ---------- */
   // 各银行产品数：跟随当前 tab（精选 = 种子 + 已通过候选；候选 = 候选池去重后），按银行分组
@@ -2390,6 +2445,23 @@ window.CANDIDATES = [];
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
+  /* 业绩比较基准剪短（2026-10-29 用户口径）：≤150 字，在接近 150 字的最近句末标点处截断。
+     ⚠ 为什么必须有这个：表格行高由该行最高的单元格决定，基准原文可达 455 字
+     （监管披露整段），在窄列里会折成 50+ 行 → 把整行撑到 800px+，
+     于是同一行的「时间分解」格被强行拉高、内容只占顶部一小条，下方全是空白
+     —— 现象是「时间分解空白占格」，真凶却是基准列。
+     原文另存 benchmarkFull，详情抽屉与 title 悬浮仍可看全文。 */
+  const BENCH_MAX = 150;
+  const BENCH_END = /[。！？；）]/;
+  function trimBenchmark(s) {
+    if (typeof s !== "string") return "";
+    const t = s.trim();
+    if (!t || t.length <= BENCH_MAX) return t;
+    let best = -1;
+    for (let i = 0; i < Math.min(t.length, BENCH_MAX); i++) if (BENCH_END.test(t[i])) best = i + 1;
+    if (best < 0) return t.slice(0, BENCH_MAX) + "…";
+    return t.slice(0, best).replace(/\s+$/, "") + "…";
+  }
   /* modeOnlyTimings：按刷新模式裁剪时间分解明细（2026-10-15 用户要求：
      刷净值只显示抓净值的时间+子项；刷信息只显示抓信息的时间+子项）。
      keepTopRe 匹配要保留的顶层阶段：nav=/^1[a-z]?\./（1.净值·xxx / 1b.补缺·xxx），
@@ -2421,9 +2493,16 @@ window.CANDIDATES = [];
   function breakdownHtml(code) {
     try {
       const m = JSON.parse(localStorage.getItem("observer_refresh_breakdown") || "{}");
-      const arr = m[code];
+      let arr = m[code];
       if (typeof arr === "string" && arr) return `<span class="bk-complete">${escapeHtml(arr)}</span>`; // 刷信息跳过已齐产品：直接存「齐全」
       if (!Array.isArray(arr) || !arr.length) return '<span class="val-zero">--</span>';
+      // 2026-10-29 健壮性：剔除「阶段名为空 / 仅剩步骤号(如 '1.')」的脏条目。
+      // 后端偶发把空 stage 写入 timings，渲染后会变成「空白却占满整格」的怪异行，故在此过滤。
+      arr = arr.filter(t => {
+        const s = String(t.stage || "").replace(/^\d+[a-z]?\.\s*/, "").replace(/#试\d+/g, "").trim();
+        return s.length > 0;
+      });
+      if (!arr.length) return '<span class="val-zero">--</span>';
       // 2026-10-14：全渠道子项——除 boc./cw./xpl./psbc. 外，fetchFromBank 的 transport
       // 计时代理会让所有银行（spdb./icbc./cmb.…）的底层 HTTP 都以 "<bank>.<路径>" 落账，
       // 故通用化为「小写字母开头的 word. 前缀=子项」；顶层阶段均以数字(1./2b./4b.)或
@@ -2519,12 +2598,29 @@ window.CANDIDATES = [];
       };
       const out = [];
       let top = 0;
-      for (const i of topIdx) {
-        const t = arr[i];
-        top++; // 编号只出现一次（去掉旧版「1 1」重复数字）
-        out.push(`<div class="bk-item"><span class="bk-i">${top}</span>` +
+      const renderTop = (t, label) => {
+        const _tn = String(t.note || "");
+        out.push(`<div class="bk-item"${_tn ? ' title="' + escapeHtml(_tn) + '"' : ""}><span class="bk-i">${label}</span>` +
           `<span>${escapeHtml(cleanName(t.stage))}</span><span class="bk-sec">${secOf(t)}</span>${cacheTag(t)}</div>`);
-        for (const s of mergeConsec(subsOf.get(i) || [])) out.push(subHtml(s, subsOf.get(i) || []));
+      };
+      if (topIdx.length) {
+        for (const i of topIdx) {
+          const t = arr[i];
+          top++; // 编号只出现一次（去掉旧版「1 1」重复数字）
+          renderTop(t, top);
+          for (const s of mergeConsec(subsOf.get(i) || [])) out.push(subHtml(s, subsOf.get(i) || []));
+        }
+      } else {
+        // 无顶层阶段包裹（后端偶发只回子项 / modeOnlyTimings 丢弃了顶层）→ 子项直接当顶层渲染，
+        // 避免「out 为空 → 整格空白」。合并连续同名（如 psbcwm.x ×N），按出现顺序编号。
+        const merged = mergeConsec(arr.filter(t => !isTotal(String(t.stage || ""))));
+        for (const t of merged) {
+          top++;
+          const nm = cleanName(t.stage) + (t.n > 1 ? " ×" + t.n : "");
+          const _tn = String(t.note || "");
+          out.push(`<div class="bk-item"${_tn ? ' title="' + escapeHtml(_tn) + '"' : ""}><span class="bk-i">${top}</span>` +
+            `<span>${escapeHtml(nm)}</span><span class="bk-sec">${secOf(t)}</span>${cacheTag(t)}</div>`);
+        }
       }
       for (const t of arr) {
         if (isTotal(String(t.stage || ""))) {
@@ -2532,7 +2628,8 @@ window.CANDIDATES = [];
             `<span>${escapeHtml(cleanName(t.stage))}</span><span class="bk-sec">${secOf(t)}</span>${cacheTag(t)}</div>`);
         }
       }
-      return out.join("");
+      const html = out.join("");
+      return html || '<span class="val-zero">--</span>'; // 兜底：绝不返回空串（否则整格空白占格）
     } catch (e) { return '<span class="val-zero">--</span>'; }
   }
   /* 额度排序值（2026-10-14 修订）：已售罄 → 0（升序排在有额度之前）；
@@ -2587,16 +2684,18 @@ window.CANDIDATES = [];
     const badge = cn > 1 ? `<span class="stale-badge">T+${cn}</span>` : "";
     const demoTag = r.source === "demo" ? `<span class="demo-badge">演示</span>`
                    : r.source === "manual" ? `<span class="manual-badge">手填</span>` : "";
-    const rfToday = isRefreshedToday(r.code) ? `<span class="rf-badge" title="今天已刷新净值">今刷</span>` : "";
-    const riskTag = /^R[1-5]$/.test(r.risk || "") ? `<span class="risk-badge ${r.risk.toLowerCase()}">${r.risk}</span>` : "";
+    // 已持仓产品的 R1/R2/R3 角标改为「$」（R4/R5 维持原风险等级）
+    const riskTag = (isCodeHeld(r.code) && /^R[123]$/.test(r.risk || ""))
+      ? `<span class="risk-badge hold-badge" title="已持仓">$</span>`
+      : (/^R[1-5]$/.test(r.risk || "") ? `<span class="risk-badge ${r.risk.toLowerCase()}">${r.risk}</span>` : "");
     let action = "";
     // 仅候选 tab 显示「通过」；精选/全部 tab 不再显示按钮，点产品名称直接查看详情（编辑在管理页进行）。
     // 「退回」按钮已移除：产品移入精选后无需再在列表里退回（管理页「移动到候选」仍可做此操作）。
     if (state.tab === "candidate") action = `<button class="pass-btn" data-pass="1">通过</button>`;
     const extra = action ? `<span class="pass-wrap">${action}</span>` : "";
-    const bankLabel = state.starOnly ? `<span class="name-bank">${escapeHtml(bankName(r.bank))}</span>` : "";
+    const bankLabel = (state.starOnly || state.heldOnly) ? `<span class="name-bank">${escapeHtml(bankName(r.bank))}</span>` : "";
     return `<tr data-code="${r.code}">
-      <td class="cell-name"><span class="name-wrap"><a class="name-link" href="javascript:void(0)">${r.name}</a>${riskTag}${bankLabel}</span>${star}${demoTag}${rfToday}${extra}</td>
+      <td class="cell-name"><span class="name-wrap"><a class="name-link" href="javascript:void(0)">${r.name}</a>${riskTag}${bankLabel}</span>${star}${demoTag}${extra}</td>
       <td><span class="nav-date">${fmt.date(r.navDate)}${badge}</span></td>
       <td class="col-navsrc">${(state.srcRefreshing && state.srcRefreshing.has((r.code || "").toUpperCase()))
         ? "" /* 本轮刷新中：先清除来源显示，抓到后由本轮结束重绘恢复 */
@@ -2605,34 +2704,41 @@ window.CANDIDATES = [];
             return `<span class="src-badge ${_s.cls}"${_s.title ? ` title="${escapeHtml(_s.title)}"` : ""}>${escapeHtml(_s.label)}${_s.extra ? `<i class="src-extra"> ＋${escapeHtml(_s.extra)}</i>` : ""}</span>`;
           })())}</td>
       <td class="col-fetch">${fmtFetchDur(fetchDurOf(r.code))}</td>
-      <td class="col-breakdown">${breakdownHtml(r.code)}</td>
+      <td class="col-breakdown"><div class="bk-wrap">${breakdownHtml(r.code)}</div></td>
       <td class="col-reg">${r.regCode ? escapeHtml(r.regCode) : '<span class="val-zero">--</span>'}</td>
       <td class="col-hold">${r.holdDays != null ? r.holdDays + "天" : '<span class="val-zero">--</span>'}</td>
       <td class="col-risk">${/^R[1-5]$/.test(r.risk || "") ? r.risk : '<span class="val-zero">--</span>'}</td>
       <td class="col-est">${r.established ? escapeHtml(r.established) : '<span class="val-zero">--</span>'}</td>
+      <td class="col-bench">${(() => {
+        const _full = (r.benchmarkFull || r.benchmark || "");
+        const _short = trimBenchmark(_full);
+        if (!_short) return '<span class="val-zero">--</span>';
+        const _tip = _short !== _full ? ` title="${escapeHtml(_full)}"` : "";
+        return `<div class="bench-wrap"${_tip}>${escapeHtml(_short)}</div>`;
+      })()}</td>
       <td class="col-quota">${(state.srcRefreshing && state.srcRefreshing.has((r.code || "").toUpperCase()))
         ? "" /* 本轮刷新中：先清除额度显示，抓到后由本轮结束重绘恢复（与「刷新来源」列一致） */
         : quotaCellHtml(r)}</td>
       <td>${r.zeroDays30}/${r.negDays30}</td>
       <td>${fmt.wan(r.dailyWan)}</td>
-      <td>${fmt.pct(r.d1)}</td>
       <td>${fmt.pct(r.y7)}</td>
       <td>${fmt.pct(r.y14)}</td>
       <td>${fmt.pct(r.y1m)}</td>
       <td>${fmt.pct(r.y3m)}</td>
-      <td>${fmt.pct(r.y1y)}</td>
       <td>${fmt.pct(r.since)}</td>
       ${pctCells(r)}
       <td>${r.cycleDays == null ? '--' : r.cycleDays}</td>
       <td>${r.estDays == null ? '--' : r.estDays}</td>
-      <td class="col-bench">${r.benchmark ? escapeHtml(r.benchmark) : '<span class="val-zero">--</span>'}</td>
     </tr>`;
   }
 
   /* ---------- 表格 ---------- */
   function applyStarModeUI() {
     const table = $("#ptable"); if (table) table.classList.toggle("star-rows", state.starOnly);
-    const hero = document.querySelector(".hero"); if (hero) hero.classList.toggle("star-hidden", state.starOnly);
+    const hero = document.querySelector(".hero"); if (hero) {
+      hero.classList.toggle("star-hidden", state.starOnly);
+      hero.classList.toggle("held-hidden", state.heldOnly);
+    }
   }
   function renderTable() {
     const tbody = $("#tbody");
@@ -2646,9 +2752,10 @@ window.CANDIDATES = [];
       // 已退回候选的产品在此被排除，改由下面 toCandRows() 带着原银行归属进入候选
       let rows = candRowsAll().filter(r => !activeCodes.has(r.code) && state.deletedCands.indexOf(r.code) < 0 && !isToCand(r.code));
       rows = rows.concat(toCandRows());
-      if (state.bank && state.bank !== "all" && !state.starOnly) rows = rows.filter(r => r.bank === state.bank);
+      if (state.bank && state.bank !== "all" && !state.starOnly && !state.heldOnly) rows = rows.filter(r => r.bank === state.bank);
       if (state.q && !state.starOnly) { const q = state.q.toLowerCase(); rows = rows.filter(r => (r.name + " " + r.code + " " + r.manager).toLowerCase().includes(q)); }
       if (state.starOnly) rows = rows.filter(r => isFav(r.code));
+      if (state.heldOnly) rows = rows.filter(r => isCodeHeld(r.code));
       rows = sortRows(rows);
       state.rows = rows;
       state.listRows = rows; // 批量刷新队列用：与页面渲染完全一致的最终行集
@@ -2660,32 +2767,35 @@ window.CANDIDATES = [];
       return;
     }
     const data = Engine.products({
-      bank: state.starOnly ? "all" : state.bank, tab: state.starOnly ? "all" : state.tab,
+      bank: (state.starOnly || state.heldOnly) ? "all" : state.bank, tab: (state.starOnly || state.heldOnly) ? "all" : state.tab,
       sort: state.sort, order: state.order, q: state.starOnly ? "" : state.q,
     });
     state.rows = data;
     state.lastRefresh = Engine.lastRefresh();
     state.holidays = Engine.HOLIDAYS;
     // 已退回候选、以及在候选里已删除的产品，都不属于精选
-    let rows = state.rows.filter(r => !state.starOnly || isFav(r.code))
+    let rows = state.rows.filter(r => (!state.starOnly || isFav(r.code)) && (!state.heldOnly || isCodeHeld(r.code)))
       .filter(r => !isToCand(r.code) && state.deletedCands.indexOf(r.code) < 0);
     const _activeCodes = new Set(state.rows.map(r => r.code));
     let passedRows = candRowsAll().filter(r => state.passed.includes(r.code) && state.deletedCands.indexOf(r.code) < 0 && !_activeCodes.has(r.code) && !isToCand(r.code));
-    if (state.bank && state.bank !== "all" && !state.starOnly) passedRows = passedRows.filter(r => r.bank === state.bank);
+    if (state.bank && state.bank !== "all" && !state.starOnly && !state.heldOnly) passedRows = passedRows.filter(r => r.bank === state.bank);
     if (state.starOnly) passedRows = passedRows.filter(r => isFav(r.code));
+    if (state.heldOnly) passedRows = passedRows.filter(r => isCodeHeld(r.code));
     rows = rows.concat(passedRows);
     // 关键修复：已通过候选是「追加」在已排序主列表之后，必须对整个合并列表重新排序，
     // 否则 AF63636B 这类刚从候选升精选的产品会永远停在最后一行、表头排序对其无效。
     rows = sortRows(rows);
     state.listRows = rows; // 批量刷新队列用：与页面渲染完全一致的最终行集（过滤+已通过候选+当前排序）
     // 刷新完成消息（含用时）优先：切走再返回该银行时保持「N/N 个产品 • 用时 Xs • 更新于 ...」，不被静态文案覆盖。
-    // starOnly（收藏）是跨银行视图，不适用银行维度消息，仍显示收藏静态文案。
-    const _prevMsg = !state.starOnly && state.bankRefreshMsg && (state.bankRefreshMsg[state.bank] || state.bankRefreshMsg["_all_"]);
+    // starOnly（收藏）/ heldOnly（持仓）均为跨银行视图，不适用银行维度消息，显示对应静态文案。
+    const _prevMsg = !state.starOnly && !state.heldOnly && state.bankRefreshMsg && (state.bankRefreshMsg[state.bank] || state.bankRefreshMsg["_all_"]);
     state.footDefault = _prevMsg
       ? _prevMsg
-      : (state.starOnly
-        ? `共 ${rows.length} 个收藏产品（不分银行）· 点击产品名查看详情`
-        : `共 ${rows.length} 个产品 · 更新于 ${state.lastRefresh} · 点击产品名查看详情`);
+      : (state.heldOnly
+        ? `共 ${rows.length} 个持仓产品（不分银行）· 点击产品名查看详情`
+        : (state.starOnly
+          ? `共 ${rows.length} 个收藏产品（不分银行）· 点击产品名查看详情`
+          : `共 ${rows.length} 个产品 · 更新于 ${state.lastRefresh} · 点击产品名查看详情`));
     setFootMsg();
     if (!rows.length) { tbody.innerHTML = ""; $("#emptyTip").classList.remove("hidden"); return; }
     $("#emptyTip").classList.add("hidden");
@@ -2730,7 +2840,8 @@ window.CANDIDATES = [];
       <span>T+${cn}确认${csrc === "说明书" ? "" : `<i class="cnf-src">${csrc}</i>`}</span>
       <span>${r.established || "成立日期未知"}成立</span>
       <span>截止至17:00</span>`;
-    $("#dBench").textContent = "业绩比较基准：" + r.benchmark;
+    // 详情抽屉显示业绩比较基准全文（列表里是剪短版，原文另存 benchmarkFull）
+    $("#dBench").textContent = "业绩比较基准：" + (r.benchmarkFull || r.benchmark || "");
     $("#dNavDate").textContent = `（${r.navDate}）`;
     const _ra = (state.refreshAt && state.refreshAt[code]) ? state.refreshAt[code] : null;
     $("#dRefreshAt").textContent = _ra ? ` · 刷新 ${fmt.clock(_ra)}` : "";
@@ -2779,6 +2890,8 @@ window.CANDIDATES = [];
     const pill = $("#btnStarDetail");
     pill.classList.toggle("on", isFav(code));
     pill.querySelector("span").textContent = isFav(code) ? "已收藏" : "收藏";
+    // ¥加持仓 → ¥已持仓：根据本地持仓（有成交）判定
+    updateHoldPill(code);
     const real = d.mode === "real";
     const manual = d.mode === "manual";
     const srcTag = s => (s === "自定义" ? "手填" : s === "说明书" ? "说明书" : "推定");
@@ -2804,6 +2917,31 @@ window.CANDIDATES = [];
     renderOverview(state.drawerDaily);
     renderDetailTable(state.drawerDaily);
     drawChart(state.drawerDaily);
+  }
+
+  // ¥加持仓 → ¥已持仓：产品已在本地台账建持仓且有成交则显示「已持仓」。
+  // 依赖本地服务 /api/holding-store 与 /api/products/latest（线上 Worker 不提供 → 保持「加持仓」）。
+  function updateHoldPill(code) {
+    const btn = $("#btnHold");
+    if (!btn) return;
+    const span = btn.querySelector("span");
+    if (span) span.textContent = "加持仓";
+    btn.classList.remove("on");
+    (async () => {
+      try {
+        const hs = await fetch("/api/holding-store");
+        if (!hs.ok) return;
+        const sd = await hs.json().catch(() => null);
+        const list = (sd && Array.isArray(sd.holdings)) ? sd.holdings : [];
+        const rp = await fetch("/api/products/latest?productId=" + encodeURIComponent(code));
+        if (!rp.ok) return;
+        const arr = await rp.json().catch(() => null);
+        const p = Array.isArray(arr) ? arr[0] : null;
+        if (!p || p.product_id == null) return;
+        const h = list.find(x => String(x.productId) === String(p.product_id) && Array.isArray(x.trades) && x.trades.length > 0);
+        if (h) { if (span) span.textContent = "已持仓"; btn.classList.add("on"); }
+      } catch (e) {}
+    })();
   }
 
   /* ---------- 数据概览 + 区间详情 ---------- */
@@ -3056,19 +3194,21 @@ window.CANDIDATES = [];
     const badge = cn > 1 ? `<span class="stale-badge">T+${cn}</span>` : "";
     const demoTag = r.source === "demo" ? `<span class="demo-badge">演示</span>`
                    : r.source === "manual" ? `<span class="manual-badge">手填</span>` : "";
-    const riskTag = /^R[1-5]$/.test(r.risk || "") ? `<span class="risk-badge ${r.risk.toLowerCase()}">${r.risk}</span>` : "";
+    // 已持仓产品的 R1/R2/R3 角标改为「$」（R4/R5 维持原风险等级）
+    const riskTag = (isCodeHeld(r.code) && /^R[123]$/.test(r.risk || ""))
+      ? `<span class="risk-badge hold-badge" title="已持仓">$</span>`
+      : (/^R[1-5]$/.test(r.risk || "") ? `<span class="risk-badge ${r.risk.toLowerCase()}">${r.risk}</span>` : "");
     return `<tr data-code="${r.code}">
       <td class="col-check"><input type="checkbox" class="mg-check" value="${r.code}"></td>
       <td class="cell-name"><span class="name-wrap"><a class="name-link" href="javascript:void(0)">${r.name}</a>${riskTag}</span>${star}${demoTag}</td>
       <td><span class="nav-date">${fmt.date(r.navDate)}</span>${badge}</td>
+      <td class="col-quota">${quotaCellHtml(r)}</td>
       <td>${r.zeroDays30}/${r.negDays30}</td>
       <td>${fmt.wan(r.dailyWan)}</td>
-      <td>${fmt.pct(r.d1)}</td>
       <td>${fmt.pct(r.y7)}</td>
       <td>${fmt.pct(r.y14)}</td>
       <td>${fmt.pct(r.y1m)}</td>
       <td>${fmt.pct(r.y3m)}</td>
-      <td>${fmt.pct(r.y1y)}</td>
       <td>${fmt.pct(r.since)}</td>
       ${pctCells(r)}
       <td>${r.cycleDays == null ? '--' : r.cycleDays}</td>
@@ -3658,16 +3798,36 @@ window.CANDIDATES = [];
     );
   }
 
-  // 本地运行时（http://localhost）优先走同源 ./api/*（由 serve.mjs 提供实时抓取）；
-  // 线上托管时优先走 Cloudflare Workers，失败再回退同源。这样本地无需部署也能实时抓银行数据。
+  // 路由策略（2026-10-28 改）：本地运行时（http://localhost:8766）默认 Cloudflare 优先、
+  // 不用用户本机 IP（避免像此前那样被各银行 / 中国理财网封 IP）；仅「未封用户 IP 的银行」在
+  // Cloudflare 失败时才回落本机 IP 做测试。线上托管恒 Cloudflare 优先、本机同源兜底。
+  // 已被用户 IP 封禁的源强制走 Cloudflare，绝不用本机 IP：
+  //   中国理财网(chinawealth) 仅经 /api/meta、/api/product 内部调用 → 这俩端点恒 remote-only；
+  //   cgb(广银理财) / ccb(建设银行) / bosc(上海银行) 是 route-by-issuer 的 bank 值。
+  // 调试逃生舱：网址加 ?local=1 可恢复旧行为（本机优先、失败回落 Cloudflare），用于本地改 worker.js 验证。
+  const IP_BLOCKED = new Set(["chinawealth", "cgb", "ccb", "bosc"]);
+  const FORCE_LOCAL = /[?&]local=1/.test(location.search);
   function isLocalRun() {
     const h = (location.hostname || "").toLowerCase();
     return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
   }
-  function apiGet(pathSuffix, timeoutMs, deadlineAt) {
+  function apiGet(pathSuffix, timeoutMs, deadlineAt, opts) {
+    opts = opts || {};
     const same = () => httpJson("./api" + pathSuffix, budgetMs(timeoutMs, deadlineAt));
     const remote = () => (API_BASE ? httpJson(API_BASE + "/api" + pathSuffix, budgetMs(timeoutMs, deadlineAt)) : Promise.reject(new Error("no remote api")));
-    return isLocalRun() ? same().catch(remote) : remote().catch(same);
+    if (FORCE_LOCAL) {
+      // 调试模式：恢复旧行为（本机优先，失败回落 Cloudflare）
+      return isLocalRun() ? same().catch(remote) : remote().catch(same);
+    }
+    if (!isLocalRun()) {
+      // 线上：Cloudflare 优先，本机同源兜底（GitHub Pages 无 /api/*，实际恒 remote）
+      return remote().catch(same);
+    }
+    // 本地(8766)：默认 Cloudflare 优先（不用我的 IP）；
+    // 仅「未封我 IP 的银行」允许回落本机 IP 做测试；
+    // 已封我 IP 的源（chinawealth/cgb/ccb/bosc，opts.ipBlocked 为真）只用 Cloudflare。
+    if (opts.ipBlocked) return remote();
+    return remote().catch(same);
   }
 
   function fetchFromServer(bank, code, deadlineAt) {
@@ -3678,7 +3838,8 @@ window.CANDIDATES = [];
     // 保证本地→远程两级来源串行重试时，总耗时也不突破 60s 总时限。
     const tm = (bank === "bosc") ? 60000 : (bank === "spdb" || bank === "nbcb" || bank === "fminbank" || bank === "cgb" || bank === "mybank" || bank === "webank") ? 45000 : (bank === "ccb") ? 30000 : 20000;
     const q = "?bank=" + encodeURIComponent(bank) + "&code=" + encodeURIComponent(code);
-    return apiGet("/fetch" + q, tm, deadlineAt);
+    // 已封用户 IP 的银行（cgb/ccb/bosc）→ 强制只走 Cloudflare；其余允许 Cloudflare 失败回落本机测试
+    return apiGet("/fetch" + q, tm, deadlineAt, { ipBlocked: IP_BLOCKED.has((bank || "").toLowerCase()) });
   }
 
   // 已知 ICBC 产品的权威元数据种子（与 serverless Worker 同步；本地优先命中，无需联网即可补全 风险/成立日/持有天数）
@@ -3704,7 +3865,8 @@ window.CANDIDATES = [];
     }
     const q = "?bank=" + encodeURIComponent(bank) + "&code=" + encodeURIComponent(code);
     const tm = (bank === "bosc") ? 60000 : (bank === "spdb" || bank === "nbcb" || bank === "fminbank" || bank === "cgb" || bank === "mybank" || bank === "webank") ? 45000 : (bank === "ccb") ? 30000 : 20000;
-    return apiGet("/meta" + q, tm, deadlineAt);
+    // /api/meta 本质是中国理财网跨库（已封用户 IP）→ 恒 remote-only，不用本机 IP
+    return apiGet("/meta" + q, tm, deadlineAt, { ipBlocked: true });
   }
 
   // 销售代码 → 发行/代销银行预判（/api/predict），模块级复用（lookupProduct 与刷新均用）
@@ -3720,10 +3882,20 @@ window.CANDIDATES = [];
   //   废除旧的「所有银行挨个试 / 工行·招行兜底」。
   // 2026-10-12：服务端耗时采集曾因模块级全局 sink 在并发下串档，本地存量的
   //   observer_refresh_breakdown 是污染数据，升级后一次性清空，重新刷新即得干净明细。
+  // 2026-10-29c：build 标记——便于确认浏览器实际加载的是哪一版（Ctrl+Shift+R 后仍空白即说明
+  // 跑在旧 DOM 上；打开 DevTools Console 应见下方这行，否则说明页面没重载到新代码）。
+  window.__APP_BUILD__ = "20261029c";
+  console.log("[理财产品聚焦] build", window.__APP_BUILD__, "· 时间分解空白占格已修（返回 -- 而非空串）");
   try {
     if (!localStorage.getItem("observer_breakdown_reset_20261012")) {
       localStorage.removeItem("observer_refresh_breakdown");
       localStorage.setItem("observer_breakdown_reset_20261012", "1");
+    }
+    // 2026-10-29c：再清一次旧「时间分解」脏数据（上一轮多次改动的过渡态可能残留空串/畸形条目），
+    // 让首刷重新落干净明细。只清一次，之后以当轮刷新结果为准。
+    if (!localStorage.getItem("observer_breakdown_reset_20261029c")) {
+      localStorage.removeItem("observer_refresh_breakdown");
+      localStorage.setItem("observer_breakdown_reset_20261029c", "1");
     }
   } catch (e) {}
   // manager：产品记录里已存的发行机构（详情页最上方卡片红圈字段 r.manager，如「招银理财」）。
@@ -3766,7 +3938,10 @@ window.CANDIDATES = [];
       (mode ? "&mode=" + encodeURIComponent(mode) : "") +
       (force ? "&noCache=1" : "");
     const t0 = (typeof performance !== "undefined") ? performance.now() : Date.now();
-    return apiGet("/product" + q, 60000, deadlineAt).then(r => {
+    // /api/product 内含中国理财网兜底（已封用户 IP）→ 恒 remote-only，不用本机 IP
+    // 取数超时放宽到 120s：仅中国理财网直连路径（deadlineAt 已放宽到 130s）会真正用到；
+    // 其余路径受 deadlineAt(=now+60s) 限制仍 ≤60s（budgetMs 取 min），不受影响。
+    return apiGet("/product" + q, 120000, deadlineAt, { ipBlocked: true }).then(r => {
       try {
         const dur = Math.round(((typeof performance !== "undefined") ? performance.now() : Date.now()) - t0);
         const m = JSON.parse(localStorage.getItem("observer_refresh_dur") || "{}");
@@ -3816,10 +3991,11 @@ window.CANDIDATES = [];
         m[code] = dur;
         localStorage.setItem("observer_refresh_dur", JSON.stringify(m));
         const pl = err && err.payload;
+        const _failNote = (err && err.status) ? ("HTTP " + err.status + " · 本轮未取到净值/信息") : "本产品本轮未取到净值/信息";
         let arr = (pl && Array.isArray(pl.timings)) ? pl.timings : null;
         if (!arr || !arr.length) {
           arr = [
-            { stage: "抓取失败（未抓到）", ms: dur, note: "本产品本轮未取到净值/信息" },
+            { stage: "抓取失败（未抓到）", ms: dur, note: _failNote },
             { stage: "总耗时", ms: dur }
           ];
         } else if (!arr.some(t => /^总耗时/.test(String(t.stage || "")))) {
@@ -3849,7 +4025,10 @@ window.CANDIDATES = [];
       risk: (info && info.risk) || null,
       holdDays: (info && info.holdDays != null) ? info.holdDays : null,
       regCode: (info && info.regCode) || null,
-      benchmark: pr.benchmark || null,
+      benchmark: pr.benchmark ? trimBenchmark(pr.benchmark) : null,
+      // 2026-10-29：基准原文（可能是 400+ 字监管披露整段）另存 benchmarkFull，
+      // 详情抽屉与 title 悬浮看全文；列表/存储统一用 ≤150 字剪短版，避免撑高表格行。
+      benchmarkFull: pr.benchmark || null,
       // 2026-10-22 修复：旧兜底 `(quota != null ? quota : null)` 在新版嵌套结构下会把整个
       // quota 对象写进 remainQuota 数值位（如 icbc 只回 quotaText="售罄"时），前端
       // fmtQuota 拿到对象 → Number(obj)=NaN → 额度位显示异常。对象只取 remainQuota 数值；
@@ -4073,11 +4252,31 @@ window.CANDIDATES = [];
       persistLookupReal(code, obj);
     }
     async function runMybank(c, dl) {
-      // 1) 网商说明书七字段（免登录：发行银行/产品名称/登记编码/最短持有/风险/成立日/基准）
-      const q = "/mybank-manual?code=" + encodeURIComponent(c);
-      const man = await apiGet(q, 90000, dl).catch(() => null);
-      const gotManual = !!(man && man.ok);
-      const issuer = gotManual ? (man.issuer || "") : "";
+      // 2026-10-29 用户规则：网商代销的「光大理财」份额不在光大银行自身 API 上，只能从中国理财网按登记编码
+      // 抓净值。这类产品已落盘登记编码，故不再调 mybank-manual PDF 说明书（免登录接口偶发 502/写满/签名器异常），
+      // 直接用登记编码走中国理财网。其余网商产品仍走 mybank-manual 取七字段 + 发行行接口。
+      // 注：本函数仅由「添加/查询」（lookupProduct → 点「查询」按钮）调用；刷新净值走 probeRealOne，
+      // 绝不调用 mybank-manual PDF——符合「说明书 PDF 只在添加产品页查询」的用户规则。
+      const _mybReal = (window.MULTI_REAL && window.MULTI_REAL[c]) || null;
+      const _mybReg = (_mybReal && _mybReal.regCode) || null;
+      const _mybMgr = (_mybReal && _mybReal.manager) || "";
+      let gotManual = false, man = null, issuer = "";
+      if (_mybReg && /光/.test(_mybMgr)) {
+        // 光大：跳过 mybank-manual，直接以登记编码走中国理财网（七字段沿用本地已落盘值）
+        man = {
+          ok: true, issuer: "", name: _mybReal.name || "", manager: _mybReal.manager || "",
+          regCode: _mybReg, risk: _mybReal.risk || null,
+          holdDays: (_mybReal.holdDays != null ? _mybReal.holdDays : null),
+          established: _mybReal.established || null, benchmark: _mybReal.benchmark || null,
+        };
+        gotManual = true;
+      } else {
+        // 1) 网商说明书七字段（免登录：发行银行/产品名称/登记编码/最短持有/风险/成立日/基准）
+        const q = "/mybank-manual?code=" + encodeURIComponent(c);
+        man = await apiGet(q, 90000, dl).catch(() => null);
+        gotManual = !!(man && man.ok);
+        issuer = gotManual ? (man.issuer || "") : "";
+      }
       // 2) 用发现的发行行（或空 → 中国理财网按码兜底）抓净值，模式 nav（只抓净值、不抓产品信息）
       const pr = await fetchProductUnified(c, issuer, "mybank", dl,
         (gotManual && man.name) || "", (gotManual && man.regCode) || "", false, null, false, "nav").catch(() => null);
@@ -4288,7 +4487,11 @@ window.CANDIDATES = [];
       quotaText: qManual ? "售罄" : (quotaSrc.quotaText || (prev && prev.quotaText) || null),
       // 手动售罄标记随对象持久保留（取消标记置 false；数据源驱动的为 null）
       quotaManual: qManual ? true : ((prev && prev.quotaManual) || null),
-      benchmark: (info.benchmark != null) ? info.benchmark : (prev && prev.benchmark != null ? prev.benchmark : null),
+      benchmark: (info.benchmark != null) ? trimBenchmark(info.benchmark)
+        : (prev && prev.benchmark != null ? prev.benchmark : null),
+      // 2026-10-29：原文留档（详情抽屉/悬浮看全文），落盘的 benchmark 统一 ≤150 字
+      benchmarkFull: (info.benchmark != null) ? info.benchmark
+        : (prev && (prev.benchmarkFull || prev.benchmark) ? (prev.benchmarkFull || prev.benchmark) : null),
       regCode: (info.regCode != null) ? info.regCode : (prev && prev.regCode != null ? prev.regCode : null),
       established: (info.established != null) ? info.established : (prev && prev.established != null ? prev.established : null),
       navVia: res.navVia || (prev && prev.navVia) || null,
@@ -4365,6 +4568,18 @@ window.CANDIDATES = [];
       iss = (pred && pred.issuerKey) || "";
     }
     if (!iss && !mgrName && !ag) return false; // 发行/代销银行都定位不到，直接判未查到
+    // 2026-10-29 用户规则：网商代销的「光大理财」份额不在光大银行自身 API 上（按渠道码查空/接口挂死），
+    // 只能从中国理财网按登记编码抓净值。这类产品已落盘登记编码（MULTI_REAL.regCode 或入参 regCode），
+    // 故不再走发行行接口、也不同 mybank-manual PDF，直接跳过发行行、路由到中国理财网兜底
+    // （后端 issuer/manager 置空 → baseBanks 为空 → 直奔 chinawealthNav(regCode)，按登记编码精确命中）。
+    const _realReg = (window.MULTI_REAL && window.MULTI_REAL[code] && window.MULTI_REAL[code].regCode) || null;
+    const _useReg = regCode || _realReg || null;
+    // 光大识别：优先用发行机构字段 mgrName，缺失时回退产品名 name（网商+光大产品名必含「光大理财」）。
+    // 双保险，确保「网商代销的光大份额」稳定命中中国理财网直连，绝不漏判去走光大银行自身接口。
+    const _mgrOrName = (mgrName || name || "");
+    const _forceCw = (bank === "mybank") && /光/.test(_mgrOrName) && !!_useReg;
+    let _effIss = iss, _effMgr = (mgrName || name || null);
+    if (_forceCw) { _effIss = ""; _effMgr = ""; } // 光大代销份额：跳过发行行接口，直奔中国理财网
     // name：产品记录已知名称（刷新场景）。银行接口临时故障时，中国理财网可按此名兜底定位，
     // 闭环「名称→regCode→xpl」净值（非10家银行不回登记编码，必须靠名称兜底）。
     // regCode：产品登记编码（如有），透传给 /api/product → fetchProductFull，让中国理财网缺口
@@ -4381,7 +4596,11 @@ window.CANDIDATES = [];
     const _rb = _row ? _row.benchmark : undefined;
     const benchKnown = (mode === "info") ? false : (_rb !== undefined && _rb !== null);
     const storedBench = benchKnown ? _rb : null; // 空串保留，代表「已知无基准」
-    const pr = await fetchProductUnified(code, iss, ag, Date.now() + 60000, name || null, regCode || null, infoComplete, storedBench, benchKnown, mode, mgrName || null, force).catch(() => null);
+    // 中国理财网冷启动（xpl 握手 + getInitData）在全新服务会话下约 50s，叠加净值查询易超 60s 前端预算 →
+    // 前端在 60s 处掐断、收不到后端分阶段耗时（时间分解恒显「抓取失败 60s」且无子项）。
+    // 给中国理财网直连路径放宽到 130s 预算 + 下方 120s 取数超时，使其首刷即成功、且能回传时间分解子项。
+    const _cwBudget = _forceCw ? 130000 : 60000;
+    const pr = await fetchProductUnified(code, _effIss, ag, Date.now() + _cwBudget, name || null, _useReg, infoComplete, storedBench, benchKnown, mode, _effMgr, force).catch(() => null);
     if (!pr) return false;
     const res = normalizeProductApi(pr);
     if (!res) return false;
@@ -4468,6 +4687,34 @@ window.CANDIDATES = [];
     } catch (e) {}
   }
 
+  // 本地是否已有完整净值序列（至少 1 个点）
+  function hasNetValue(code) {
+    const rec = (window.MULTI_REAL && window.MULTI_REAL[code]) || null;
+    return !!(rec && rec.series && rec.series.length);
+  }
+
+  // 刷新优先级（2026-10-29 用户规则）：刷净值时优先刷「还没刷到净值」的产品 ——
+  //   0 = 上次刷新被标记为「未抓到」(fetchFail)           → 最先重试
+  //   1 = 本地从无净值序列（从来没抓到过）                  → 次之
+  //   2 = 今天尚未刷新（有净值但需更新到最新）              → 再次
+  //   3 = 今天已刷新过（可最后兜底）                       → 最后
+  // 这样网商等银行里「反复未抓到」的产品每次都排到队首，不再被「今天已刷」的产品淹没。
+  function refreshPriority(code) {
+    if (isFetchFailed(code)) return 0;          // 未抓到 → 最先
+    if (!hasNetValue(code)) return 1;           // 从无净值 → 次之
+    if (!isRefreshedToday(code)) return 2;      // 今天未刷 → 再次
+    return 3;                                   // 今天已刷 → 兜底
+  }
+
+  // 基于「快照时固化」的 ff/nv/rf 标记算优先级（不受 clearTimeColumns 清未抓到标记影响）：
+  // clearTimeColumns 会在排序前清空 observer_fetch_fail，故排序必须用构建快照时捕获的 ff，而非实时 isFetchFailed。
+  function refreshPriorityOf(item) {
+    if (item.ff) return 0;
+    if (!item.nv) return 1;
+    if (!item.rf) return 2;
+    return 3;
+  }
+
   // 抓取失败标记（用户规则 2026-10-13：503 / 429 等没抓到 → 列表「刷新来源」列显示「未抓到」；
   // 下次同一产品抓取成功即自动清除；新一轮手动批量刷新开始时全量清除）
   function isFetchFailed(code) {
@@ -4489,7 +4736,14 @@ window.CANDIDATES = [];
   }
   function clearAllFetchFail(scopeBank) {
     try {
-      if (scopeBank && scopeBank !== "all") {
+      // scope 可以是：银行 key / "all"（全清） / code 集合（跨银行视图：只清列表内这些产品）
+      const isCodeSet = scopeBank && typeof scopeBank === "object" && typeof scopeBank.has === "function";
+      if (isCodeSet) {
+        const m = JSON.parse(localStorage.getItem("observer_fetch_fail") || "{}");
+        let changed = false;
+        for (const c of Object.keys(m)) if (scopeBank.has(c)) { delete m[c]; changed = true; }
+        if (changed) localStorage.setItem("observer_fetch_fail", JSON.stringify(m));
+      } else if (scopeBank && scopeBank !== "all") {
         // 2026-10-14 用户规则：刷新只清【当前银行】的「未抓到」标记，其它银行的保留
         const codes = new Set(Engine.products({ bank: scopeBank, tab: "all" })
           .map(r => (r.code || "").trim().toUpperCase()).filter(Boolean));
@@ -4643,8 +4897,21 @@ window.CANDIDATES = [];
         if (_bankRefresh.dirty) {
           // 性能优化 F（2026-10-15）：单银行刷新只重算该银行产品，避免 110 全量重算。
           // rebuildBank 定义在 Engine 工厂闭包内、经 Engine.rebuildBank 暴露，必须带 Engine. 前缀（裸调用会 ReferenceError）。
-          if (_bankRefresh.scope === "bank") Engine.rebuildBank(_bankRefresh.bank);
-          else Engine.refresh();
+          // ⚠ 跨银行视图（收藏★/持有$）下刷新队列横跨多个银行；若只 rebuildBank(state.bank)，
+          //   其它银行的产品行会保留旧指标 → 典型症状「后端已抓到新净值，页面净值日/万收仍是旧值」
+          //   （2026-10-29 实例：$ 视图刷新南银理财 NYCF000019，MULTI_REAL 已是 10-29，页面仍显示 10-28）。
+          //   故按「本批实际触达的银行集合」重算：单银行走 rebuildBank（快），多银行逐个重建。
+          const _touched = new Set();
+          for (const t of todo) if (t && t.bank) _touched.add(t.bank);
+          if (_touched.size === 1) {
+            Engine.rebuildBank(_touched.values().next().value);
+          } else if (_touched.size > 1) {
+            for (const b of _touched) Engine.rebuildBank(b);
+          } else {
+            Engine.refresh();
+          }
+          // 候选行（已通过候选）走 candRowsAll() 的 _candCache，缓存后不再重算 → 刷新后仍是旧指标，必须作废。
+          _candCache = null;
         }
         // 本轮抓取全部完成：清空「刷新中」临时标记，重绘时「刷新来源」列恢复为刚抓到的新来源
         state.srcRefreshing = new Set();
@@ -4675,16 +4942,35 @@ window.CANDIDATES = [];
       const code = (r.code || "").trim().toUpperCase();
       if (!code || seen.has(code)) continue;
       seen.add(code);
-      snap.push({ code, bank: r.bank, name: r.name, regCode: r.regCode || null, rf: isRefreshedToday(code) });
+      // ff/nv/rf 在快照构建时即捕获：clearTimeColumns 会在排序前清空「未抓到」标记，
+      // 若排序时再实时读 isFetchFailed 会丢失优先级，故把判定结果固化进快照。
+      snap.push({ code, bank: r.bank, name: r.name, regCode: r.regCode || null,
+        rf: isRefreshedToday(code), ff: isFetchFailed(code), nv: hasNetValue(code) });
     }
     return snap;
+  }
+  // 当前视图的刷新作用域：
+  //   收藏★/持有$ 是跨银行视图（state.listRows 里各银行产品混合）→ 作用域 = 当前列表的全部 code；
+  //   普通视图 → 单银行（state.bank）。
+  // 为什么要按视图而不是固定 state.bank：跨银行视图下刷新队列横跨多家银行，若仍按 state.bank
+  // 清理/重建，就会漏掉其它银行的产品（残留旧来源、旧额度，指标行不重算）。
+  function currentScopeCodes() {
+    if (state.starOnly || state.heldOnly) {
+      const s = new Set();
+      for (const r of (state.listRows || state.rows || [])) {
+        const c = (r.code || "").trim().toUpperCase();
+        if (c) s.add(c);
+      }
+      return s;
+    }
+    return state.bank; // 字符串：银行 key，交给下游按银行展开
   }
   // 刷净值：只重新抓取净值（信息若已补全则跳过），先清【当前银行】的「抓取时间 / 时间分解」
   async function refreshBankNav() {
     const snap = buildBankSnap();
     if (!snap.length) { toast("当前列表没有可刷新的产品"); return; }
-    clearTimeColumns(state.bank);
-    snap.sort((a, b) => (a.rf === b.rf) ? 0 : (a.rf ? 1 : -1));
+    clearTimeColumns(currentScopeCodes());
+    snap.sort((a, b) => refreshPriorityOf(a) - refreshPriorityOf(b));
     await runRefreshQueue(snap, "bank", "#btnRefreshNav", "nav");
   }
   // 刷信息：重新抓取静态信息（最短持有 / 风险 / 成立日期 / 登记编码）。
@@ -4693,8 +4979,8 @@ window.CANDIDATES = [];
   async function refreshBankInfo() {
     const snap = buildBankSnap();
     if (!snap.length) { toast("当前列表没有可刷新的产品"); return; }
-    clearTimeColumns(state.bank); // 先清两列，刷新后逐产品重填（齐全的写「齐全」、不足的重抓写明细）
-    snap.sort((a, b) => (a.rf === b.rf) ? 0 : (a.rf ? 1 : -1));
+    clearTimeColumns(currentScopeCodes()); // 先清两列，刷新后逐产品重填（齐全的写「齐全」、不足的重抓写明细）
+    snap.sort((a, b) => refreshPriorityOf(a) - refreshPriorityOf(b));
     await runRefreshQueue(snap, "bank", "#btnRefreshInfo", "info");
   }
   // 刷额度：重新抓取各产品剩余可购额度（发行→代销），不动净值/信息。
@@ -4706,7 +4992,7 @@ window.CANDIDATES = [];
     // 2026-10-27 用户规则：刷额度先清掉当前银行产品的额度，再刷新。
     // 清掉后表格立即显示空白额度，刷新成功的产品回填新值、失败/无额度的留空（未知），
     // 杜绝「已售罄产品仍显示上一轮 >1亿元」这类陈旧值误导。
-    clearBankQuota(state.bank);
+    clearBankQuota(currentScopeCodes());
     // 2026-10-27：刷额度时同步清空列表「刷新来源」列（与刷净值一致），避免刷新期间残留上一轮的旧来源；
     // 本轮结束由 runRefreshQueue 统一把 state.srcRefreshing 置空并重绘，恢复为刚抓到的额度来源。
     state.srcRefreshing = new Set(snap.map(s => s.code));
@@ -4724,18 +5010,21 @@ window.CANDIDATES = [];
     const finish = () => { _refreshBusy = false; };
     // mode="nav"（主页右上刷新图标）只刷新净值、不碰产品信息；缺省则两者都刷
     const mode = (opts && opts.mode) || "";
-    // 先清空「抓取时间 / 时间分解」两列，刷新完成后逐产品落新数据
-    clearTimeColumns();
+    // 先按当前产物快照捕获「未抓到/有无净值/今天是否已刷」——clearTimeColumns 会清空未抓到标记，
+    // 必须在清列之前固化，否则排序时 isFetchFailed 已失效、优先级失效。
     const todo = [], seen = new Set();
     for (const r of Engine.products({ bank: "all", tab: "all" })) {
       const code = (r.code || "").trim().toUpperCase();
       if (!code || seen.has(code)) continue;
       seen.add(code);
-      todo.push({ code, bank: r.bank, name: r.name, regCode: r.regCode || null, rf: isRefreshedToday(code) });
+      todo.push({ code, bank: r.bank, name: r.name, regCode: r.regCode || null,
+        rf: isRefreshedToday(code), ff: isFetchFailed(code), nv: hasNetValue(code) });
     }
+    // 清空「抓取时间 / 时间分解」两列 + 上一轮「未抓到」标记，刷新完成后逐产品落新数据
+    clearTimeColumns();
     if (!todo.length) { state.srcRefreshing = new Set(); Engine.refresh(); renderTable(); renderBanks(); finish(); toast("数据已刷新"); return Promise.resolve(); }
-    // 今天未刷优先，已刷兜底（防先刷已刷的、没刷的反而在排队）
-    todo.sort((a, b) => (a.rf === b.rf) ? 0 : (a.rf ? 1 : -1));
+    // 今天未刷优先、未抓到/从无净值更优先：先补「还没刷到净值」的产品，已刷的兜底
+    todo.sort((a, b) => refreshPriorityOf(a) - refreshPriorityOf(b));
     return runRefreshQueue(todo, "all", null, mode).then(finish, finish);
   }
 
@@ -4924,7 +5213,19 @@ window.CANDIDATES = [];
   function clearTimeColumns(scopeBank) {
     try {
       let codes;
-      if (scopeBank && scopeBank !== "all") {
+      // scope 可以是：银行 key / "all"（全清） / code 集合（跨银行视图：只清列表内这些产品）
+      const isCodeSet = scopeBank && typeof scopeBank === "object" && typeof scopeBank.has === "function";
+      if (isCodeSet) {
+        // 跨银行视图（收藏★/持有$）：只清当前列表内这些 code 的耗时/时间分解，
+        // 不动其它银行的历史（用 "all" 会把别的银行的抓取时间也抹掉）。
+        codes = new Set(scopeBank);
+        for (const key of ["observer_refresh_dur", "observer_refresh_breakdown"]) {
+          const m = JSON.parse(localStorage.getItem(key) || "{}");
+          let changed = false;
+          for (const c of Object.keys(m)) if (codes.has(c)) { delete m[c]; changed = true; }
+          if (changed) localStorage.setItem(key, JSON.stringify(m));
+        }
+      } else if (scopeBank && scopeBank !== "all") {
         codes = new Set(Engine.products({ bank: scopeBank, tab: "all" })
           .map(r => (r.code || "").trim().toUpperCase()).filter(Boolean));
         for (const key of ["observer_refresh_dur", "observer_refresh_breakdown"]) {
@@ -4957,9 +5258,12 @@ window.CANDIDATES = [];
   // 仅清当前银行（与 clearTimeColumns(scopeBank) 同口径），不动其它银行、不动净值/信息。
   function clearBankQuota(scopeBank) {
     try {
-      const scope = scopeBank || state.bank;
-      const codes = new Set(Engine.products({ bank: scope, tab: "all" })
-        .map(r => (r.code || "").trim().toUpperCase()).filter(Boolean));
+      // scope 可以是：银行 key / "all" / code 集合（跨银行视图：只清列表内这些产品）
+      const isCodeSet = scopeBank && typeof scopeBank === "object" && typeof scopeBank.has === "function";
+      const scope = isCodeSet ? "all" : (scopeBank || state.bank);
+      const codes = isCodeSet ? new Set(scopeBank)
+        : new Set(Engine.products({ bank: scope, tab: "all" })
+          .map(r => (r.code || "").trim().toUpperCase()).filter(Boolean));
       if (!codes.size) return;
       const store = window.MULTI_REAL || (window.MULTI_REAL = {});
       for (const c of codes) {
@@ -4974,6 +5278,7 @@ window.CANDIDATES = [];
       // 否则仅改 MULTI_REAL 不重建行 → renderTable 仍读旧副本 → 「额度」列在刷新期间不清空。
       // 直接改 store.rows 元素（Engine.products 返回的是行对象引用），renderTable 立即生效。
       for (const r of Engine.products({ bank: scope, tab: "all" })) {
+        if (isCodeSet && !codes.has((r.code || "").trim().toUpperCase())) continue;
         if (r.quotaManual === true) continue; // 手动售罄标记同样保留
         r.remainQuota = null; r.remainQuotaPct = null; r.quotaSaleStatus = null;
         r.quotaState = null; r.quotaText = null; r.quotaCurrency = null;
@@ -4982,8 +5287,23 @@ window.CANDIDATES = [];
   }
 
   $("#btnStar").addEventListener("click", function () {
+    // 与「持有」按钮互斥：开启收藏时关闭持仓，反之亦然
+    if (state.heldOnly) { state.heldOnly = false; const hb = $("#btnHeld"); if (hb) hb.classList.remove("active"); }
     state.starOnly = !state.starOnly;
     this.classList.toggle("active", state.starOnly);
+    renderTable();
+  });
+  $("#btnHeld").addEventListener("click", async function () {
+    if (!HELD_CODES && !HELD_FAILED) {
+      toast("正在读取持仓…");
+      await loadHeldCodes(false);
+    }
+    if (HELD_FAILED || !HELD_CODES) { toast("持仓数据仅在本地服务（serve.mjs）可用"); return; }
+    if (HELD_CODES.size === 0) { toast("你还没有持有任何产品"); return; }
+    // 与「收藏」按钮互斥：开启持仓时关闭收藏，反之亦然
+    if (state.starOnly) { state.starOnly = false; const sb = $("#btnStar"); if (sb) sb.classList.remove("active"); }
+    state.heldOnly = !state.heldOnly;
+    this.classList.toggle("active", state.heldOnly);
     renderTable();
   });
 
@@ -5232,11 +5552,52 @@ window.CANDIDATES = [];
   window.openEdit = openEdit;
   window.__appReady = true;
 
+  /* ---------- 方案 B：同源 JSON 叠加（jsb/ceb） ----------
+   * Cloudflare Worker 线上抓不到江苏银行(jsb)/光大银行(ceb)（WAF/瑞数需真 Chrome），
+   * 改由 GitHub Actions runner 定时抓取并写回同源 净值数据.json（带 gha:true 标记）。
+   * 本函数只读同源同名文件、仅叠加 gha:true 的 jsb/ceb 记录，绝不动其它银行的 localStorage。
+   * 合并沿用 restoreLookupReal 的「序列末点更晚者优先」语义，避免把已刷新的数据回退成演示/旧值。
+   */
+  async function applyGhaNavOverlay() {
+    try {
+      const resp = await fetch("净值数据.json", { cache: "no-cache" });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const realRaw = data && data.data && data.data.observer_lookup_real;
+      if (!realRaw) return;
+      const real = typeof realRaw === "string" ? JSON.parse(realRaw) : realRaw;
+      let added = 0;
+      const existing = JSON.parse(localStorage.getItem("observer_lookup_real") || "{}");
+      const _lastD = (x) => {
+        const s = (x && x.series) || [];
+        for (let i = s.length - 1; i >= 0; i--) if (s[i] && s[i][0]) return String(s[i][0]);
+        return "";
+      };
+      for (const code in real) {
+        const o = real[code];
+        if (!o || o.gha !== true) continue;          // 仅作用于方案 B 产出的 jsb/ceb 记录
+        const cur = existing[code];
+        if (!cur || _lastD(o) >= _lastD(cur)) { existing[code] = o; added++; }
+      }
+      if (!added) return;
+      localStorage.setItem("observer_lookup_real", JSON.stringify(existing));
+      window.MULTI_REAL = window.MULTI_REAL || {};
+      for (const code in real) {
+        if (real[code] && real[code].gha === true) window.MULTI_REAL[code] = real[code];
+      }
+      if (window.Engine && typeof window.Engine.refresh === "function") window.Engine.refresh();
+      console.info("[gha] 已从同源 JSON 叠加 " + added + " 个 jsb/ceb 净值");
+    } catch (e) {
+      console.warn("[gha] 同源净值叠加失败（不影响其它银行）：" + ((e && e.message) || e));
+    }
+  }
+
   /* ---------- 初始化 ---------- */
   function init() {
     bindConfirm();
     bindNotice();
     restoreLookupReal();
+    applyGhaNavOverlay();
     // 「时间」按钮状态恢复：持久化为开 → 表格加 show-time、按钮置 active
     if (state.showTime) {
       const pt = document.querySelector("#tableWrap .ptable") || document.querySelector(".ptable");

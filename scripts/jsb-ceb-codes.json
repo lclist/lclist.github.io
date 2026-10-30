@@ -1,0 +1,9 @@
+[
+  { "code": "EW6210A", "bank": "ceb", "name": "阳光金创利稳健日开33号（7天最低持有）A", "manager": "光大理财", "risk": "R2", "holdDays": 7, "established": "2026-01-28", "benchmark": null, "regCode": null },
+  { "code": "EW7899A", "bank": "ceb", "name": "阳光金丰利1178期A", "manager": "光大理财", "risk": "R2", "holdDays": 1, "established": "2026-09-16", "benchmark": null, "regCode": null },
+  { "code": "120030N", "bank": "jsb", "name": "招银理财招睿添金7天持有期11号固定收益类理财计划（招行 N 份额）", "manager": "招银理财", "risk": "R2", "holdDays": 7, "established": "2026-06-03", "benchmark": null, "regCode": null },
+  { "code": "EW7746A", "bank": "ceb", "name": "阳光金增利稳健天天购46号（14天最低持有）A", "manager": "光大理财", "risk": "R2", "holdDays": 14, "established": "2026-06-09", "benchmark": null, "regCode": null },
+  { "code": "J09652", "bank": "jsb", "name": "苏银理财恒源灵动最短持有180天10号A", "manager": "苏银理财有限责任公司", "risk": "R2", "holdDays": 1, "established": "2025-10-30", "benchmark": null, "regCode": null },
+  { "code": "J04946", "bank": "jsb", "name": "苏银理财恒源天添鑫12号A", "manager": "苏银理财有限责任公司", "risk": "R2", "holdDays": 1, "established": "2025-07-03", "benchmark": null, "regCode": null },
+  { "code": "NYJXLD3020O", "bank": "jsb", "name": "农银理财农银匠心·灵动30天理财产品第20期（默认 O 份额）", "manager": "农银理财", "risk": "R2", "holdDays": 30, "established": "2026-06-03", "benchmark": null, "regCode": null }
+]

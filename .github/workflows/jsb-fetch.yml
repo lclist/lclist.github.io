@@ -1,0 +1,54 @@
+name: 刷新 jsb/ceb 净值
+
+on:
+  schedule:
+    # 每天 16:00 UTC = 北京 00:00（次日），确保当日净值已披露；cron 以 UTC 计
+    - cron: "0 16 * * *"
+  workflow_dispatch: {}   # 允许手动触发（调试用）
+
+permissions:
+  contents: write        # 写回 净值数据.json 并推回 main
+
+concurrency:
+  group: jsb-fetch
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 确保 Chrome 可用
+        run: |
+          BIN="$(which google-chrome-stable || which google-chrome)"
+          if [ -z "$BIN" ]; then echo "::error::未找到 Chrome"; exit 1; fi
+          # jsb_app.mjs 的 CHROME_CANDIDATES 含 /usr/bin/google-chrome，ceb 读取 $CEB_CHROME
+          ln -sf "$BIN" /usr/bin/google-chrome 2>/dev/null || true
+          echo "CEB_CHROME=$BIN" >> "$GITHUB_ENV"
+          echo "Chrome: $BIN"
+
+      - name: 安装 puppeteer-core
+        run: npm install puppeteer-core
+
+      - name: 批量抓取 jsb+ceb 并写回 净值数据.json
+        run: node scripts/fetch-jsb-ceb.mjs
+
+      - name: 提交（仅当 净值数据.json 有变化）
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add 净值数据.json
+          if git diff --cached --quiet; then
+            echo "净值数据.json 无变化，跳过提交"
+          else
+            git commit -m "chore: 自动刷新 jsb/ceb 净值 $(date -u +%Y-%m-%d)"
+            git push
+          fi
