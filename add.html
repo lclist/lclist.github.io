@@ -3606,6 +3606,27 @@ window.CANDIDATES = [];
         for (const c in lsIcbc) lsReal[c] = _mergeObj(lsReal[c], lsIcbc[c]);
         console.info("[restore] 已把遗留 observer_lookup_icbc（" + Object.keys(lsIcbc).length + " 项）并入 real 桶");
       }
+      // 2026-10-30：清理孤儿净值记录——浏览器 localStorage（observer_lookup_real）是净值权威源，
+      // 会被回灌服务端。若其中残留「已被删产品」的 NAV，刷新时会把它们重新恢复进来，
+      // 使「恢复个数」高于 registry 实际产品数（例如 registry 174、缓存却恢复 194）。
+      // 这里一次性把不在活跃 registry 里的 code 永久删掉，使 localStorage 与 registry 永远一致。
+      let _pruned = 0;
+      try {
+        const _regRaw = localStorage.getItem("observer_reg_v1");
+        if (_regRaw) {
+          const _reg = JSON.parse(_regRaw) || {};
+          const _valid = new Set();
+          const _custom = Array.isArray(_reg.custom) ? _reg.custom : Object.values(_reg.custom || {});
+          for (const c of _custom) { if (c && c.code) _valid.add(String(c.code).toUpperCase()); }
+          if (_reg.patches && typeof _reg.patches === "object") for (const k in _reg.patches) _valid.add(String(k).toUpperCase());
+          if (_valid.size) {
+            for (const c in lsReal) {
+              if (!_valid.has(String(c).toUpperCase())) { delete lsReal[c]; _pruned++; }
+            }
+          }
+        }
+      } catch (e) { console.warn("[restore] 孤儿清理失败（跳过）：" + ((e && e.message) || e)); }
+      if (_pruned) console.info("[restore] 已永久清理 localStorage 孤儿净值记录 " + _pruned + " 条（不在活跃 registry）");
       const put = (c, obj) => {
         const cur = merged[c];
         const curHas = cur && hasSeries(cur.obj);
