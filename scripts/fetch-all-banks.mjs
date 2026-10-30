@@ -1,5 +1,5 @@
 // 全银行净值定时刷新（GitHub Actions runner 上运行）
-// - 读取仓库内 产品数据.json 的 registry，得到全部有效产品（custom − deleted，含 patches）
+// - 读取仓库内 产品数据.json 的 registry，得到全部有效产品（custom，含 patches；无 deleted 墓碑）
 // - jsb/ceb：走本机/runner 的 puppeteer-core + 系统 Chrome（线上 Worker 无浏览器，抓不到）
 // - 其余银行：直接调线上 Cloudflare Worker 的 /api/product（复用其 25 家银行抓取逻辑，已免登录直连）
 // - 合并策略：保留基线 净值数据.json 的静态字段（risk/holdDays/established/regCode/kind/gha），
@@ -67,13 +67,11 @@ function loadProducts() {
     else if (x && typeof x === "object") items.push(x);
   };
   custom.forEach(flat);
-  const deleted = new Set((reg.deleted || []).map((d) => d && String(d.code).toUpperCase()).filter(Boolean));
   const patches = reg.patches || {};
   const out = [];
   for (const r of items) {
     if (!r || !r.code) continue;
     const code = String(r.code).toUpperCase();
-    if (deleted.has(code)) continue;
     const patch = patches[code] || {};
     out.push({
       code,
@@ -259,7 +257,15 @@ async function main() {
   }
   console.log("[all] Worker 抓取：成功合并 " + merged + " / 跳过(无数据) " + skipped);
 
-  // 3) 写回（仅变化时）
+  // 3) 孤儿清理：移除不在活跃 registry 的 nav 记录，保证 净值数据.json 与 registry 永远一致、不留孤儿
+  const activeCodes = new Set(products.map((p) => p.code));
+  let pruned = 0;
+  for (const code of Object.keys(real)) {
+    if (!activeCodes.has(code)) { delete real[code]; pruned++; }
+  }
+  if (pruned) console.log("[all] 孤儿清理：移除 " + pruned + " 条不在 registry 的 nav 记录");
+
+  // 4) 写回（仅变化时）
   const prevRealStr = realRaw || "";
   const newRealStr = JSON.stringify(real);
   outer.data = outer.data || {};
@@ -271,7 +277,7 @@ async function main() {
   outer.data.observer_lookup_real = newRealStr;
   outer.savedAt = new Date().toISOString();
   fs.writeFileSync(NAV_FILE, JSON.stringify(outer), "utf8");
-  console.log("[all] 完成：已写回 " + path.basename(NAV_FILE) + "（用时 " + ((Date.now() - t0) / 1000).toFixed(1) + "s）");
+  console.log("[all] 完成：已写回 " + path.basename(NAV_FILE) + "（含孤儿清理 " + pruned + " 条，用时 " + ((Date.now() - t0) / 1000).toFixed(1) + "s）");
 }
 
 main().catch((e) => {
