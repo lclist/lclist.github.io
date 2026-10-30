@@ -3762,36 +3762,38 @@ window.CANDIDATES = [];
     );
   }
 
-  // 路由策略（2026-10-28 改）：本地运行时（http://localhost:8766）默认 Cloudflare 优先、
-  // 不用用户本机 IP（避免像此前那样被各银行 / 中国理财网封 IP）；仅「未封用户 IP 的银行」在
-  // Cloudflare 失败时才回落本机 IP 做测试。线上托管恒 Cloudflare 优先、本机同源兜底。
-  // 已被用户 IP 封禁的源强制走 Cloudflare，绝不用本机 IP：
-  //   中国理财网(chinawealth) 仅经 /api/meta、/api/product 内部调用 → 这俩端点恒 remote-only；
-  //   cgb(广银理财) / ccb(建设银行) / bosc(上海银行) 是 route-by-issuer 的 bank 值。
-  // 调试逃生舱：网址加 ?local=1 可恢复旧行为（本机优先、失败回落 Cloudflare），用于本地改 worker.js 验证。
-  const IP_BLOCKED = new Set(["chinawealth", "cgb", "ccb", "bosc"]);
+  // 路由策略（2026-10-30 改）：
+  //   本地运行时（http://localhost:8766）→ 只走用户本机 IP（同源 ./api，由 serve.mjs 经本机网络
+  //     直连银行/发行方接口，含需无头 Chrome 的 jsb/ceb/bob 等），绝不回落线上 Cloudflare。
+  //   线上托管（lclist.github.io）→ 只走线上 Cloudflare Worker，绝不回落本机 IP。
+  //   两路各自单点、互不兜底，便于公平对比「本机 IP」与「线上 Cloudflare」抓净值耗时。
+  //   调试逃生舱：网址加 ?local=1 恢复旧行为（本机优先、失败回落 Cloudflare；线上反之），用于兜底/验证。
+  // 背景：2026-10-28 为规避用户 IP 被中国理财网/部分银行封禁，本地改为 Cloudflare 优先，
+  //   导致 jsb/ceb/bob 等需真浏览器的银行在线抓不到、其余银行也偏慢。现按用户要求改回本机 IP 优先。
   const FORCE_LOCAL = /[?&]local=1/.test(location.search);
   function isLocalRun() {
     const h = (location.hostname || "").toLowerCase();
     return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
   }
+  (function () {
+    const mode = FORCE_LOCAL ? "debug(?local=1：本机优先+Cloudflare兜底)"
+      : (isLocalRun() ? "本地→本机IP(纯本地，不走线上)" : "线上→Cloudflare(纯线上，不走本机IP)");
+    console.log("[理财产品聚焦] 抓取路由：" + mode);
+  })();
   function apiGet(pathSuffix, timeoutMs, deadlineAt, opts) {
     opts = opts || {};
     const same = () => httpJson("./api" + pathSuffix, budgetMs(timeoutMs, deadlineAt));
     const remote = () => (API_BASE ? httpJson(API_BASE + "/api" + pathSuffix, budgetMs(timeoutMs, deadlineAt)) : Promise.reject(new Error("no remote api")));
     if (FORCE_LOCAL) {
-      // 调试模式：恢复旧行为（本机优先，失败回落 Cloudflare）
+      // 调试模式：本机优先、失败回落 Cloudflare（线上时反之）
       return isLocalRun() ? same().catch(remote) : remote().catch(same);
     }
     if (!isLocalRun()) {
-      // 线上：Cloudflare 优先，本机同源兜底（GitHub Pages 无 /api/*，实际恒 remote）
-      return remote().catch(same);
+      // 线上（GitHub Pages）：只走线上 Cloudflare，绝不回落本机 IP
+      return remote();
     }
-    // 本地(8766)：默认 Cloudflare 优先（不用我的 IP）；
-    // 仅「未封我 IP 的银行」允许回落本机 IP 做测试；
-    // 已封我 IP 的源（chinawealth/cgb/ccb/bosc，opts.ipBlocked 为真）只用 Cloudflare。
-    if (opts.ipBlocked) return remote();
-    return remote().catch(same);
+    // 本地(8766)：只走用户本机 IP（serve.mjs 经本机网络抓取），绝不回落线上
+    return same();
   }
 
   function fetchFromServer(bank, code, deadlineAt) {
@@ -3802,8 +3804,8 @@ window.CANDIDATES = [];
     // 保证本地→远程两级来源串行重试时，总耗时也不突破 60s 总时限。
     const tm = (bank === "bosc") ? 60000 : (bank === "spdb" || bank === "nbcb" || bank === "fminbank" || bank === "cgb" || bank === "mybank" || bank === "webank") ? 45000 : (bank === "ccb") ? 30000 : 20000;
     const q = "?bank=" + encodeURIComponent(bank) + "&code=" + encodeURIComponent(code);
-    // 已封用户 IP 的银行（cgb/ccb/bosc）→ 强制只走 Cloudflare；其余允许 Cloudflare 失败回落本机测试
-    return apiGet("/fetch" + q, tm, deadlineAt, { ipBlocked: IP_BLOCKED.has((bank || "").toLowerCase()) });
+    // 本地走本机 IP；线上走 Cloudflare（由 apiGet 按运行环境自动选路，不再按银行强制远端）
+    return apiGet("/fetch" + q, tm, deadlineAt, {});
   }
 
   // 已知 ICBC 产品的权威元数据种子（与 serverless Worker 同步；本地优先命中，无需联网即可补全 风险/成立日/持有天数）
@@ -3829,8 +3831,8 @@ window.CANDIDATES = [];
     }
     const q = "?bank=" + encodeURIComponent(bank) + "&code=" + encodeURIComponent(code);
     const tm = (bank === "bosc") ? 60000 : (bank === "spdb" || bank === "nbcb" || bank === "fminbank" || bank === "cgb" || bank === "mybank" || bank === "webank") ? 45000 : (bank === "ccb") ? 30000 : 20000;
-    // /api/meta 本质是中国理财网跨库（已封用户 IP）→ 恒 remote-only，不用本机 IP
-    return apiGet("/meta" + q, tm, deadlineAt, { ipBlocked: true });
+    // /api/meta 为中国理财网跨库（本地与线上均由 apiGet 按运行环境选路，不再强制远端）
+    return apiGet("/meta" + q, tm, deadlineAt, {});
   }
 
   // 销售代码 → 发行/代销银行预判（/api/predict），模块级复用（lookupProduct 与刷新均用）
@@ -3902,10 +3904,11 @@ window.CANDIDATES = [];
       (mode ? "&mode=" + encodeURIComponent(mode) : "") +
       (force ? "&noCache=1" : "");
     const t0 = (typeof performance !== "undefined") ? performance.now() : Date.now();
-    // /api/product 内含中国理财网兜底（已封用户 IP）→ 恒 remote-only，不用本机 IP
+    // /api/product 的净值主路径为银行/发行方接口（本地由本机 IP 直连，线上走 Cloudflare），
+    // 仅「银行都失败」时才由中国理财网兜底（被封用户 IP 时该兜底会失败，属预期，可经 ?local=1 兜底）。
     // 取数超时放宽到 120s：仅中国理财网直连路径（deadlineAt 已放宽到 130s）会真正用到；
     // 其余路径受 deadlineAt(=now+60s) 限制仍 ≤60s（budgetMs 取 min），不受影响。
-    return apiGet("/product" + q, 120000, deadlineAt, { ipBlocked: true }).then(r => {
+    return apiGet("/product" + q, 120000, deadlineAt, {}).then(r => {
       try {
         const dur = Math.round(((typeof performance !== "undefined") ? performance.now() : Date.now()) - t0);
         const m = JSON.parse(localStorage.getItem("observer_refresh_dur") || "{}");
