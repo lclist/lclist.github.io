@@ -4441,7 +4441,11 @@ window.CANDIDATES = [];
     const writeInfo   = (mode !== "nav" && mode !== "quota");
     const writeQuota  = (mode !== "nav" && mode !== "info");
     if (writeSeries && (!res.series || !res.series.length)) {
-      if (mode === "nav") return false; // 纯刷净值却无序列 → 判失败（不误改信息）
+      // 纯刷净值却无序列 → 判失败（不误改信息）。
+      // ⚠ 2026-10-31 例外：增量腿跑通但 0 新增点（res.navIncremental）=「已是最新」，不是「没抓到」
+      //   → 放行：series 取 mergeNavSeries(prev.series, []) = 旧序列（历史不丢），
+      //   同时把 navVia/navPort/lastSrcVia 更新为本轮真实来源（否则来源标签残留上一轮的值）。
+      if (mode === "nav" && !res.navIncremental) return false;
     }
     // 2026-10-22：icbc 分桶已废弃，所有净值统一写 MULTI_REAL（净值来源看对象自身的 navVia）
     const store = window.MULTI_REAL;
@@ -4615,8 +4619,13 @@ window.CANDIDATES = [];
     } else if (!res.series || !res.series.length) {
       // 2026-10-30 增量抓取：本轮无新增点 = 「已是最新」，属成功（不是失败）——
       // 序列不变，标记「已刷新」即可，不应判为未抓到。
-      if (res.navIncremental) return true;
-      return false; // 纯刷净值/全量却无序列 → 判失败（不误改信息）
+      // ⚠ 2026-10-31 修：此前此处直接 `return true`，**跳过了 adoptRealSeries** →
+      //   MULTI_REAL 的 navVia / navPort / lastSrcVia 不更新 → 「刷新来源」列残留**上一轮**的标签。
+      //   实测症状：招行本轮真实来源已是「招商银行App」，但上一轮兜底留下了 navVia=chinawealth，
+      //   列表仍显示「中国理财网」——而时间分解里根本没有中国理财网的请求，看着自相矛盾。
+      //   改为**继续往下走 adoptRealSeries**：序列由 mergeNavSeries(prev,[]) 保留旧序列（历史不丢），
+      //   只把来源/端口标记更新为本轮真实来源。
+      if (!res.navIncremental) return false; // 纯刷净值/全量却无序列 → 判失败（不误改信息）
     }
     // 实际落盘来源：优先用 navVia（chinawealth / 具体银行），icbc 产品线仍归 icbc
     const storeBank = (pr.navVia === "chinawealth")
