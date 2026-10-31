@@ -2390,6 +2390,11 @@ window.CANDIDATES = [];
     // 2026-10-25：ccb 端口在货架零命中时回落发行方建信理财官网（wealthccb.com）抓到的净值
     //（网商等渠道份额码不在建行货架的情形）——navVia 记为 ccb、navPort=ccbwm，单独标注真实来源
     if (via === "ccb" && port === "ccbwm") return { label: "建信理财官网", cls: "src-bank" };
+    // 2026-10-31：招银理财官网（www.cmbchinawm.com）——招行 cfweb 超市腿对**已下架**产品
+    //   返空（实测 132112D/MS/N 三兄弟份额 body=0、PB132112D 代销码也空），而招银理财官网
+    //   作为发行方信披渠道，下架后仍保留历史净值与详情 → navVia=cmb、navPort=cmbwm，
+    //   单独标注真实来源（否则会显示成「招商银行」而误以为来自招行货架）。
+    if (via === "cmb" && port === "cmbwm") return { label: "招银理财官网", cls: "src-bank" };
     // 2026-10-27：广银理财官网（发行方自有信披平台 www.cgbwmc.com.cn）——
     //   广发官网/广发 App 只认「广发自己在售」的产品，中行/微众代销的广银理财产品只有这里有，
     //   故单列标注，避免显示成「广发银行」而让人以为来自广发渠道。
