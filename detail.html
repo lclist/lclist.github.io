@@ -4459,6 +4459,10 @@ window.CANDIDATES = [];
     // 产品只返回模板值「>1亿元」、不反映真实售罄（真实售罄仅签名 App 网关可见）。用户对照 App 后
     // 手动标记售罄，刷额度/刷净值不得覆盖它；取消标记后才恢复数据源驱动。
     const qManual = (writeQuota && prev && prev.quotaManual === true);
+    // ⚠ 2026-10-31：schedule-skip 是「未到净值披露时间、本轮没回源」的**哨兵**，不是来源！
+    //   写进 navVia/lastSrcVia 会让「刷新来源」列显示成「schedule-skip」→
+    //   此时**保留上一轮的来源标记**，只把序列按 0 新增点处理（已是最新）。
+    const __skip = res.navVia === "schedule-skip";
     const obj = {
       name: res.name || (prev && prev.name) || null,
       manager: res.manager || (prev && prev.manager) || null,
@@ -4490,8 +4494,9 @@ window.CANDIDATES = [];
         : (prev && (prev.benchmarkFull || prev.benchmark) ? (prev.benchmarkFull || prev.benchmark) : null),
       regCode: (info.regCode != null) ? info.regCode : (prev && prev.regCode != null ? prev.regCode : null),
       established: (info.established != null) ? info.established : (prev && prev.established != null ? prev.established : null),
-      navVia: res.navVia || (prev && prev.navVia) || null,
-      navPort: (res.navPort != null) ? res.navPort : (prev && prev.navPort != null ? prev.navPort : null),
+      navVia: __skip ? ((prev && prev.navVia) || null) : (res.navVia || (prev && prev.navVia) || null),
+      navPort: __skip ? ((prev && prev.navPort) != null ? prev.navPort : null)
+                       : ((res.navPort != null) ? res.navPort : (prev && prev.navPort != null ? prev.navPort : null)),
       // 双来源明细（2026-10-25）：浦银代销信银这类「代销 App + 发行官网」并发双抓时后端回两家，
       // 前端「刷新来源」列同时显示。刷信息/刷额度不抓净值 → 沿用上一次的记录。
       navSources: (Array.isArray(res.navSources) && res.navSources.length > 1)
@@ -4504,10 +4509,11 @@ window.CANDIDATES = [];
         : (mode === "info" ? ((prev && prev.lastSrcMode) || null) : "nav"),
       lastSrcVia: (mode === "quota")
         ? (bank || (prev && prev.lastSrcVia) || null)
-        : (res.navVia || (prev && prev.lastSrcVia) || null),
+        : (__skip ? ((prev && prev.lastSrcVia) || null) : (res.navVia || (prev && prev.lastSrcVia) || null)),
       lastSrcPort: (mode === "quota")
         ? (res.navPort != null ? res.navPort : ((prev && prev.lastSrcPort) != null ? prev.lastSrcPort : null))
-        : (res.navPort != null ? res.navPort : ((prev && prev.lastSrcPort) != null ? prev.lastSrcPort : null)),
+        : (__skip ? ((prev && prev.lastSrcPort) != null ? prev.lastSrcPort : null)
+                  : (res.navPort != null ? res.navPort : ((prev && prev.lastSrcPort) != null ? prev.lastSrcPort : null))),
     };
     window.MULTI_REAL = window.MULTI_REAL || {};
     window.MULTI_REAL[code] = obj;

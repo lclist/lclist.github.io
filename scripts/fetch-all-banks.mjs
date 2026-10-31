@@ -183,13 +183,19 @@ function mergeSeriesByDate(prev, neu, newWins) {
   return [...m.values()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 }
 
-async function fetchViaWorker(code, bank, since) {
+async function fetchViaWorker(code, bank, since, regCode, name) {
   // since：增量（只补缺失/新增点），避免每小时重翻全量历史（中邮等 25 页产品省时显著）
   // noCache=1：CDN 缓存 TTL 6h，同一 since 的结果会被缓存住 → 主动回源，保证当轮真实
+  // ⚠ 2026-10-31 补 regCode + name（与前端同款口径）：网商/微众代销的「专属份额码」
+  //   在发行行官网查无此码 → 银行腿秒返 null → 若不传登记编码，中国理财网兜底也查无此码
+  //   → 整单 404「找不到」（实测 8 只：EW5902D/EW6729D/EW3836D/EW7829D/26H6399E/
+  //   WPBK24M0501T/132040B/EW7019D）。传上 regCode 后，兜底按登记编码精确双键命中。
   const url =
     WORKER_BASE + "/api/product?code=" + encodeURIComponent(code) +
     "&issuer=" + encodeURIComponent(bank) + "&mode=nav&noCache=1" +
-    (since ? "&since=" + encodeURIComponent(since) : "");
+    (since ? "&since=" + encodeURIComponent(since) : "") +
+    (regCode ? "&regCode=" + encodeURIComponent(regCode) : "") +
+    (name ? "&name=" + encodeURIComponent(name) : "");
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), WORKER_TIMEOUT_MS);
   try {
@@ -204,20 +210,38 @@ async function fetchViaWorker(code, bank, since) {
   }
 }
 
-function mergeWorkerRecord(existing, R) {
+function mergeWorkerRecord(existing, R, prodBank) {
   if (!R || !R.code) return null;
   const seriesRaw = (R.nav && Array.isArray(R.nav.series) && R.nav.series) ||
     (Array.isArray(R.series) && R.series) || null;
-  if (!seriesRaw || !seriesRaw.length) return null;
-  const series = seriesRaw.map((p) =>
+  // 2026-10-31 修：增量腿跑通但 **0 新增点**（=「已是最新」）时**不跳过**——
+  //   此前直接 return null → navVia/navPort 不更新 → 「刷新来源」列残留上一轮的标签
+  //   （实测招行本轮真实来源已是「招商银行App」，却仍显示上一轮兜底留下的「中国理财网」，
+  //    而时间分解里根本没有中国理财网的请求 → 自相矛盾）。现改为仍合并：序列保留旧序列
+  //   （mergeSeriesByDate(prev,[]) → prev），只把来源/端口标记更新为本轮真实来源。
+  const isIncrementalNoNew = !!(R.nav && R.nav.navIncremental);
+  const hasPrev = !!(existing && Array.isArray(existing.series) && existing.series.length);
+  if ((!seriesRaw || !seriesRaw.length) && !(isIncrementalNoNew && hasPrev)) return null;
+  const series = (seriesRaw || []).map((p) =>
     Array.isArray(p) ? (p.length >= 3 ? [p[0], p[1], p[2]] : [p[0], p[1], null]) : p
   );
-  const last = series[series.length - 1];
   const merged = Object.assign({}, existing);
   merged.code = R.code;
-  merged.bank = R.navVia || R.source || existing.bank || null;
-  merged.navVia = R.navVia || existing.navVia || null;
-  merged.navPort = R.navPort || existing.navPort || null;
+  // bank = 产品所属银行（registry 的代销/货架行），**不是**净值来源。
+  // ⚠ 2026-10-31 修：此前用 R.navVia → 中国理财网兜底那一轮会把 bank 写成 "chinawealth"，
+  //   污染记录归属（实测 5 条：YC040219/667828A/132042A/667468WS/NYXJLD1409G）。
+  merged.bank = prodBank || existing.bank || R.navVia || null;
+  // ⚠ 2026-10-31：schedule-skip 是「未到净值披露时间、本轮没回源」的**哨兵**，不是来源！
+  //   写进 navVia 会让「刷新来源」列显示成「schedule-skip」→ 此时保留上一轮的来源标记。
+  const isSkip = R.navVia === "schedule-skip";
+  merged.navVia = isSkip ? (existing.navVia || null) : (R.navVia || existing.navVia || null);
+  // 中国理财网/xpl 无「端口」概念 → 置 null；否则会与旧的银行端口混搭出
+  // 「中国理财网 + App」这种自相矛盾的组合（实测 5 条）。
+  merged.navPort = isSkip
+    ? (existing.navPort || null)
+    : ((merged.navVia === "chinawealth" || merged.navVia === "xpl")
+      ? null
+      : (R.navPort || existing.navPort || null));
   merged.name = R.name || existing.name || null;
   merged.manager = R.manager || existing.manager || null;
   if (R.benchmark) merged.benchmark = R.benchmark;
@@ -247,7 +271,13 @@ async function fetchWorkerBatch(products, real) {
       const p = products[i];
       try {
         // 增量：带上本地已有序列的最后净值日 → Worker 只补缺失/新增点
-        const R = await fetchViaWorker(p.code, p.bank, lastDateOf(real ? real[p.code] : null));
+        // regCode/name：随产品一起传（与前端同款）→ 网商代销专属份额码靠登记编码命中兜底
+        const prevRec = real ? real[p.code] : null;
+        const R = await fetchViaWorker(
+          p.code, p.bank, lastDateOf(prevRec),
+          (prevRec && prevRec.regCode) || null,
+          p.name || (prevRec && prevRec.name) || null
+        );
         if (R) out[p.code] = R;
       } catch (e) {
         console.warn("[all] " + p.code + " Worker 抓取失败：" + (e && e.message));
@@ -291,7 +321,7 @@ async function main() {
   for (const p of others) {
     const R = workerResults[p.code];
     if (!R) { skipped++; continue; }
-    const mergedRec = mergeWorkerRecord(real[p.code] || null, R);
+    const mergedRec = mergeWorkerRecord(real[p.code] || null, R, p.bank);
     if (!mergedRec) { skipped++; continue; }
     real[p.code] = mergedRec;
     merged++;
