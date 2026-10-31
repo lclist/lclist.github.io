@@ -116,6 +116,14 @@ function normalizeJsbCeb(res, prev, bank, st) {
   obj.established = res.established != null ? res.established : prev && prev.established != null ? prev.established : st && st.established != null ? st.established : null;
   obj.navVia = res.navVia || (prev && prev.navVia) || null;
   obj.navPort = res.navPort != null ? res.navPort : prev && prev.navPort != null ? prev.navPort : null;
+  // 2026-10-31：同步 lastSrcVia/lastSrcPort（刷新来源标签），与 fetchWorker 腿一致
+  if (res.navVia && res.navVia !== "schedule-skip") {
+    obj.lastSrcVia = res.navVia;
+    obj.lastSrcPort = res.navPort != null ? res.navPort : (prev && prev.lastSrcPort) || null;
+  } else if (prev) {
+    obj.lastSrcVia = prev.lastSrcVia || null;
+    obj.lastSrcPort = prev.lastSrcPort || null;
+  }
   obj.bank = bank || (prev && prev.bank) || null;
   obj.gha = true; // 标记：前端 overlay 据此识别云端刷新记录
   return obj;
@@ -242,6 +250,11 @@ function mergeWorkerRecord(existing, R, prodBank) {
     : ((merged.navVia === "chinawealth" || merged.navVia === "xpl")
       ? null
       : (R.navPort || existing.navPort || null));
+  // 2026-10-31：同步 lastSrcVia/lastSrcPort（刷新来源标签）—— 与 navVia/navPort 守卫一致：
+  //   schedule-skip（未回源）时 = existing（保留上一轮）；否则 = 本轮真实来源。
+  //   此前漏写 → cmbwm 等腿落盘后 lastSrcVia 残留上一轮来源（如 132112D 显示 cgb/app）。
+  merged.lastSrcVia = merged.navVia;
+  merged.lastSrcPort = merged.navPort;
   merged.name = R.name || existing.name || null;
   merged.manager = R.manager || existing.manager || null;
   if (R.benchmark) merged.benchmark = R.benchmark;
